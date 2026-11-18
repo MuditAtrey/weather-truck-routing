@@ -1,0 +1,30 @@
+# Private research: never publish (contains the assessment PDF and notes naming other candidates)
+research/
+research_notes/
+reports/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editors (VS Code tasks can auto-run code; keep them out of the repo)
+.vscode/
+.idea/
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+staticfiles/
+
+# Node
+node_modules/
+dist/
+*.log

@@ -1,0 +1,54 @@
+[project]
+name = "weather-truck-routing"
+version = "1.0.0"
+description = "Weather-aware truck routing API (Django + Django Ninja)"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.1,<6.2",
+    "django-ninja>=1.8,<2",
+    "httpx>=0.28,<0.29",
+    "timezonefinder>=7,<9",
+    "tzdata>=2025.2",
+    "uvicorn>=0.34",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-django>=4.11",
+    "pytest-asyncio>=1.0",
+    "respx>=0.22",
+    "hypothesis>=6.130",
+    "ruff>=0.12",
+    "mypy>=1.17",
+    "django-stubs[compatible-mypy]>=5.2",
+    "pip-audit>=2.9",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings_test"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "DJ", "ASYNC", "S", "SIM", "RUF"]
+ignore = ["S101", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "pydantic.mypy"]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+exclude = ["^tests/"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings_test"
