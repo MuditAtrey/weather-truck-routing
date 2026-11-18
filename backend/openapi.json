@@ -1,0 +1,740 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Weather-aware truck routing",
+    "version": "1.0.0",
+    "description": "Plans three truck routes and scores them against forecast weather."
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "planner_api_health",
+        "summary": "Health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response",
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/timezone": {
+      "get": {
+        "operationId": "planner_api_timezone",
+        "summary": "Timezone",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lat",
+            "schema": {
+              "title": "Lat",
+              "type": "number"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "lon",
+            "schema": {
+              "title": "Lon",
+              "type": "number"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimezoneOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/plan": {
+      "post": {
+        "operationId": "planner_api_plan",
+        "summary": "Plan",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/score": {
+      "post": {
+        "operationId": "planner_api_score",
+        "summary": "Score",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "TimezoneOut": {
+        "properties": {
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone"
+        ],
+        "title": "TimezoneOut",
+        "type": "object"
+      },
+      "PlanOut": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "departure": {
+            "title": "Departure",
+            "type": "integer"
+          },
+          "hours": {
+            "description": "Heatmap hours (epoch seconds), departure hour + 0..48",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hours",
+            "type": "array"
+          },
+          "router": {
+            "$ref": "#/components/schemas/RouterInfo"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "routes": {
+            "additionalProperties": true,
+            "description": "GeoJSON FeatureCollection of LineStrings",
+            "title": "Routes",
+            "type": "object"
+          },
+          "checkpoints": {
+            "additionalProperties": true,
+            "description": "GeoJSON FeatureCollection of Points",
+            "title": "Checkpoints",
+            "type": "object"
+          },
+          "grid": {
+            "additionalProperties": true,
+            "description": "GeoJSON FeatureCollection of Polygons",
+            "title": "Grid",
+            "type": "object"
+          },
+          "weather_points": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherPoint"
+            },
+            "title": "Weather Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "token",
+          "timezone",
+          "departure",
+          "hours",
+          "router",
+          "warnings",
+          "routes",
+          "checkpoints",
+          "grid",
+          "weather_points"
+        ],
+        "title": "PlanOut",
+        "type": "object"
+      },
+      "RouterInfo": {
+        "properties": {
+          "provider": {
+            "enum": [
+              "valhalla",
+              "osrm"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "profile": {
+            "enum": [
+              "truck",
+              "car_capped"
+            ],
+            "title": "Profile",
+            "type": "string"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          }
+        },
+        "required": [
+          "provider",
+          "profile",
+          "fallback_reason"
+        ],
+        "title": "RouterInfo",
+        "type": "object"
+      },
+      "WeatherPoint": {
+        "properties": {
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "start": {
+            "description": "First hour needed (epoch seconds, on the hour)",
+            "title": "Start",
+            "type": "integer"
+          },
+          "end": {
+            "description": "Last hour needed (epoch seconds, on the hour)",
+            "title": "End",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lat",
+          "lon",
+          "start",
+          "end"
+        ],
+        "title": "WeatherPoint",
+        "type": "object"
+      },
+      "ErrorOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "ErrorOut",
+        "type": "object"
+      },
+      "Place": {
+        "properties": {
+          "lat": {
+            "maximum": 90,
+            "minimum": -90,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 180,
+            "minimum": -180,
+            "title": "Lon",
+            "type": "number"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lat",
+          "lon"
+        ],
+        "title": "Place",
+        "type": "object"
+      },
+      "PlanIn": {
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/Place"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/Place"
+          },
+          "departure_local": {
+            "description": "Departure as wall-clock time at the origin, YYYY-MM-DDTHH:MM",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$",
+            "title": "Departure Local",
+            "type": "string"
+          },
+          "cargo_lb": {
+            "description": "Cargo weight in pounds",
+            "maximum": 80000,
+            "minimum": 0,
+            "title": "Cargo Lb",
+            "type": "integer"
+          },
+          "interval_mi": {
+            "default": 25,
+            "enum": [
+              10,
+              25,
+              50
+            ],
+            "title": "Interval Mi",
+            "type": "integer"
+          },
+          "hos": {
+            "default": true,
+            "description": "Add US hours-of-service breaks to ETAs",
+            "title": "Hos",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "departure_local",
+          "cargo_lb"
+        ],
+        "title": "PlanIn",
+        "type": "object"
+      },
+      "CheckpointWeather": {
+        "properties": {
+          "wind": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wind"
+          },
+          "gust": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gust"
+          },
+          "rain": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rain"
+          },
+          "snow": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snow"
+          }
+        },
+        "required": [
+          "wind",
+          "gust",
+          "rain",
+          "snow"
+        ],
+        "title": "CheckpointWeather",
+        "type": "object"
+      },
+      "ModeResult": {
+        "properties": {
+          "checkpoint_levels": {
+            "description": "One char per checkpoint: 0-4, or u if unknown",
+            "title": "Checkpoint Levels",
+            "type": "string"
+          },
+          "checkpoint_drivers": {
+            "description": "w(ind), r(ain), s(now), or - per checkpoint",
+            "title": "Checkpoint Drivers",
+            "type": "string"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/RouteScore"
+            },
+            "title": "Routes",
+            "type": "array"
+          },
+          "ranking": {
+            "$ref": "#/components/schemas/RankingOut"
+          },
+          "heatmap": {
+            "description": "Per hour, one char per grid cell: 0-4 or u",
+            "items": {
+              "type": "string"
+            },
+            "title": "Heatmap",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checkpoint_levels",
+          "checkpoint_drivers",
+          "routes",
+          "ranking",
+          "heatmap"
+        ],
+        "title": "ModeResult",
+        "type": "object"
+      },
+      "RankingOut": {
+        "properties": {
+          "order": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Order",
+            "type": "array"
+          },
+          "recommended": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommended"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "all_no_travel",
+              "weather_incomplete",
+              "no_weather"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "reasons": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "object"
+          }
+        },
+        "required": [
+          "order",
+          "recommended",
+          "status",
+          "reasons"
+        ],
+        "title": "RankingOut",
+        "type": "object"
+      },
+      "RouteScore": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "miles_by_level": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Miles By Level",
+            "type": "array"
+          },
+          "unknown_mi": {
+            "title": "Unknown Mi",
+            "type": "number"
+          },
+          "avg_risk": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Risk"
+          },
+          "worst": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst"
+          }
+        },
+        "required": [
+          "id",
+          "miles_by_level",
+          "unknown_mi",
+          "avg_risk",
+          "worst"
+        ],
+        "title": "RouteScore",
+        "type": "object"
+      },
+      "ScoreOut": {
+        "properties": {
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/CheckpointWeather"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "sustained": {
+            "$ref": "#/components/schemas/ModeResult"
+          },
+          "gust": {
+            "$ref": "#/components/schemas/ModeResult"
+          }
+        },
+        "required": [
+          "conditions",
+          "sustained",
+          "gust"
+        ],
+        "title": "ScoreOut",
+        "type": "object"
+      },
+      "PointWeather": {
+        "properties": {
+          "wind": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "title": "Wind",
+            "type": "array"
+          },
+          "gust": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "title": "Gust",
+            "type": "array"
+          },
+          "rain": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "title": "Rain",
+            "type": "array"
+          },
+          "showers": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "title": "Showers",
+            "type": "array"
+          },
+          "snow": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 200,
+            "title": "Snow",
+            "type": "array"
+          }
+        },
+        "required": [
+          "wind",
+          "gust",
+          "rain",
+          "showers",
+          "snow"
+        ],
+        "title": "PointWeather",
+        "type": "object"
+      },
+      "ScoreIn": {
+        "properties": {
+          "token": {
+            "maxLength": 200000,
+            "title": "Token",
+            "type": "string"
+          },
+          "weather": {
+            "items": {
+              "$ref": "#/components/schemas/PointWeather"
+            },
+            "maxItems": 2000,
+            "title": "Weather",
+            "type": "array"
+          }
+        },
+        "required": [
+          "token",
+          "weather"
+        ],
+        "title": "ScoreIn",
+        "type": "object"
+      }
+    }
+  },
+  "servers": []
+}
