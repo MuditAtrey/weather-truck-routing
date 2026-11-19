@@ -37,13 +37,31 @@ const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
 const SELECTED_LOW = '#1e3a8a' // the selected route reads as "selected" where risk is Low
 
-const SEMI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="96" viewBox="0 0 24 48">
-  <rect x="5" y="17" width="14" height="29" rx="1.5" fill="#f8fafc" stroke="#111827" stroke-width="1.6"/>
-  <line x1="8" y1="21" x2="16" y2="21" stroke="#94a3b8" stroke-width="1"/>
-  <rect x="6" y="3" width="12" height="12" rx="3" fill="#1e3a8a" stroke="#ffffff" stroke-width="1.4"/>
-  <rect x="8" y="4.5" width="8" height="3" rx="1" fill="#bfdbfe"/>
-  <rect x="10.5" y="14.5" width="3" height="3" fill="#111827"/>
-</svg>`
+
+/** A top-down semi (tractor + trailer) pointing north, as RGBA pixels at 2x. */
+function drawSemi(): ImageData {
+  const w = 48, h = 96
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const g = c.getContext('2d')!
+  const box = (x: number, y: number, bw: number, bh: number, r: number, fill: string, stroke: string, lw: number) => {
+    g.beginPath()
+    g.roundRect(x, y, bw, bh, r)
+    g.fillStyle = fill
+    g.fill()
+    g.lineWidth = lw
+    g.strokeStyle = stroke
+    g.stroke()
+  }
+  box(10, 34, 28, 58, 3, '#f8fafc', '#111827', 3.2) // trailer
+  box(12, 6, 24, 24, 6, '#1e3a8a', '#ffffff', 2.8) // cab
+  g.fillStyle = '#bfdbfe'
+  g.fillRect(16, 9, 16, 6) // windscreen
+  g.fillStyle = '#111827'
+  g.fillRect(21, 29, 6, 6) // fifth wheel
+  return g.getImageData(0, 0, w, h)
+}
 
 const levelColor = (low: string) =>
   [
@@ -70,6 +88,9 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
   const [ready, setReady] = useState(0)
   const [failed, setFailed] = useState(false)
   const fitted = useRef<Plan | null>(null)
+  const [follow, setFollow] = useState(false)
+  const followRef = useRef(false)
+  followRef.current = follow
   const live = useRef({ plan, score, mode, selected, onSelect, heatmapOn, dark })
   live.current = { plan, score, mode, selected, onSelect, heatmapOn, dark }
 
@@ -106,14 +127,14 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     map.touchZoomRotate.disableRotation()
 
     // A top-down semi (tractor + trailer) pointing north; the layer rotates it to the route.
-    const semi = new Image(48, 96)
+    // The truck icon is drawn synchronously (no image loading to race the style), and
+    // re-added whenever a style switch clears it.
     const addSemi = () => {
-      if (semi.complete && semi.naturalWidth && map.isStyleLoaded() && !map.hasImage('semi')) {
-        map.addImage('semi', semi, { pixelRatio: 2 })
-      }
+      if (!map.hasImage('semi')) map.addImage('semi', drawSemi(), { pixelRatio: 2 })
     }
-    semi.onload = addSemi
-    semi.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SEMI_SVG)}`
+    map.on('styleimagemissing', (e) => {
+      if (e.id === 'semi') addSemi()
+    })
 
     map.on('style.load', () => {
       addSemi()
@@ -145,26 +166,23 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         id: 'route-risk',
         type: 'line',
         source: 'segments',
-        filter: ['==', ['get', 'route'], -1],
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
           'line-color': levelColor(live.current.dark ? '#60a5fa' : SELECTED_LOW),
-          'line-width': ['interpolate', ['linear'], ['zoom'], 3, 4, 8, 6, 12, 8],
+          'line-width': 3,
         },
       })
       map.addLayer({
         id: 'cp',
         type: 'circle',
         source: 'checkpoints',
-        filter: ['==', ['get', 'route'], -1],
         paint: {
-          'circle-color': levelColor(live.current.dark ? '#60a5fa' : SELECTED_LOW),
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, 7, 3.5, 10, 6],
-          // Zoomed out, the coloured line carries the risk; dots appear as you zoom in.
-          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5.5, 0, 6.5, 1],
-          'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 5.5, 0, 6.5, 1],
-          'circle-stroke-color': ['case', ['==', ['feature-state', 'level'], 4], '#111827', '#ffffff'],
-          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 8, 1.5],
+          // Weather checkpoints: small white sample points, filled with the risk colour
+          // when risk is Moderate or worse, so they never look like route beads.
+          'circle-color': levelColor('#ffffff'),
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2.2, 7, 3.5, 11, 5.5],
+          'circle-stroke-color': live.current.dark ? '#cbd5e1' : '#334155',
+          'circle-stroke-width': 1,
         },
       })
       map.addLayer({
@@ -250,12 +268,10 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         .addTo(map)
     })
     map.on('mouseleave', 'stops', hide)
-    map.on('click', 'route-line', (e) => {
-      const r = e.features?.[0]?.properties?.id
+    map.on('click', 'route-risk', (e) => {
+      const r = e.features?.[0]?.properties?.route
       if (typeof r === 'number') live.current.onSelect(r)
     })
-    map.on('mouseenter', 'route-line', () => (map.getCanvas().style.cursor = 'pointer'))
-    map.on('mouseleave', 'route-line', () => (map.getCanvas().style.cursor = ''))
 
     return () => {
       popup.remove()
@@ -311,28 +327,26 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     }
     if (plan && plan.routes.features.length && fitted.current !== plan) {
       fitted.current = plan
-      let w = 180, s = 90, e = -180, n = -90
-      for (const f of plan.routes.features)
-        for (const [x, y] of f.geometry.coordinates) {
-          w = Math.min(w, x!); e = Math.max(e, x!); s = Math.min(s, y!); n = Math.max(n, y!)
-        }
-      const wide = window.innerWidth >= 900
-      map.fitBounds([[w, s], [e, n]], {
-        padding: wide ? { top: 70, bottom: 140, left: 60, right: 60 } : 30,
-        duration: 600,
-      })
+      fitRoutes(map, plan)
     }
   }, [plan, segments, heat, ready])
 
-  // Route selection: grey alternatives, risk-coloured selected route and its checkpoints.
+  // Route selection: every route shows its risk; the selected one is thick and on top.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const isSel = ['==', ['get', 'id'], selected]
-    map.setPaintProperty('route-line', 'line-opacity', ['case', isSel, 0, 0.7] as never)
-    map.setPaintProperty('route-casing', 'line-width', ['case', isSel, 10, 6] as never)
-    map.setFilter('route-risk', ['==', ['get', 'route'], selected])
-    map.setFilter('cp', ['==', ['get', 'route'], selected])
+    const routeSel = ['==', ['get', 'route'], selected]
+    const lowSel = live.current.dark ? '#60a5fa' : SELECTED_LOW
+    const lowOther = live.current.dark ? '#64748b' : '#8b95a5'
+    map.setPaintProperty('route-line', 'line-opacity', 0)
+    map.setPaintProperty('route-casing', 'line-width', ['case', ['==', ['get', 'id'], selected], 10, 5] as never)
+    map.setPaintProperty('route-risk', 'line-color', ['case', routeSel, levelColor(lowSel), levelColor(lowOther)] as never)
+    map.setPaintProperty('route-risk', 'line-width', ['case', routeSel, ['interpolate', ['linear'], ['zoom'], 3, 4.5, 8, 6.5, 12, 8], ['interpolate', ['linear'], ['zoom'], 3, 2.5, 8, 3.5, 12, 4]] as never)
+    map.setPaintProperty('route-risk', 'line-opacity', ['case', routeSel, 1, 0.75] as never)
+    map.setLayoutProperty('route-risk', 'line-sort-key', ['case', routeSel, 1, 0] as never)
+    map.setPaintProperty('cp', 'circle-opacity', ['case', routeSel, 1, 0.55] as never)
+    map.setPaintProperty('cp', 'circle-stroke-opacity', ['case', routeSel, 1, 0.55] as never)
+    map.setLayoutProperty('cp', 'circle-sort-key', ['case', routeSel, 1, 0] as never)
     map.setFilter('stops', ['==', ['get', 'route'], selected])
   }, [selected, ready, plan])
 
@@ -369,7 +383,10 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           requestAnimationFrame(() => heatSrc?.pause())
         }
       }
-      truckSrc.setData(truckAt(plan, live.current.selected, plan.hours[h] ?? 0))
+      const truck = truckAt(plan, live.current.selected, plan.hours[h] ?? 0)
+      truckSrc.setData(truck)
+      const pos = truck.features[0]?.geometry.coordinates as [number, number] | undefined
+      if (followRef.current && pos) map.easeTo({ center: pos, duration: 350 })
     }
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(apply)
@@ -380,7 +397,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       unsub()
       cancelAnimationFrame(raf)
     }
-  }, [plan, heat, heatHours, ready, selected])
+  }, [plan, heat, heatHours, ready, selected, follow])
 
   useEffect(() => {
     const map = mapRef.current
@@ -402,7 +419,38 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       </div>
     )
   }
-  return <div ref={el} className="map" aria-label="Route map" />
+  return (
+    <>
+      <div ref={el} className="map" aria-label="Route map" />
+      {plan && (
+        <div className="map-buttons">
+          <button
+            type="button"
+            onClick={() => {
+              setFollow(false)
+              if (mapRef.current) fitRoutes(mapRef.current, plan)
+            }}
+            title="Show the whole trip"
+          >
+            Whole trip
+          </button>
+          <button type="button" className={follow ? 'on' : undefined} aria-pressed={follow} onClick={() => setFollow((f) => !f)} title="Keep the truck in view as the time changes">
+            Follow truck
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
+function fitRoutes(map: MlMap, plan: Plan) {
+  let w = 180, s = 90, e = -180, n = -90
+  for (const f of plan.routes.features)
+    for (const [x, y] of f.geometry.coordinates) {
+      w = Math.min(w, x!); e = Math.max(e, x!); s = Math.min(s, y!); n = Math.max(n, y!)
+    }
+  const wide = window.innerWidth >= 900
+  map.fitBounds([[w, s], [e, n]], { padding: wide ? { top: 70, bottom: 160, left: 60, right: 60 } : 30, duration: 600 })
 }
 
 /** Where the truck is on the selected route at `t` (interpolated between checkpoints). */

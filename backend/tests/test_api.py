@@ -80,7 +80,7 @@ async def test_same_place_is_rejected_before_routing() -> None:
 async def test_departure_window() -> None:
     past = await aclient.post("/plan", json=body(departure_local=departure(-3)))
     assert past.json()["code"] == "departure_past"
-    far = await aclient.post("/plan", json=body(departure_local=departure(80)))
+    far = await aclient.post("/plan", json=body(departure_local=departure(24 * 7 + 3)))
     assert far.json()["code"] == "departure_too_far"
 
 

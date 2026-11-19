@@ -12,7 +12,8 @@
     "typecheck": "tsc -b",
     "lint": "oxlint src",
     "preview": "vite preview",
-    "gen:api": "npx --yes openapi-typescript@7.13.0 ../backend/openapi.json -o src/api/schema.d.ts"
+    "gen:api": "npx --yes openapi-typescript@7.13.0 ../backend/openapi.json -o src/api/schema.d.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "maplibre-gl": "6.19.0",
@@ -27,6 +28,7 @@
     "@vitejs/plugin-react": "6.3.0",
     "oxlint": "1.94.0",
     "typescript": "7.0.2",
-    "vite": "8.3.8"
+    "vite": "8.3.8",
+    "vitest": "4.1.12"
   }
 }

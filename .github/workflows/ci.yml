@@ -44,6 +44,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build # includes the strict TypeScript check
       - run: npm audit --omit=dev --audit-level=high
 

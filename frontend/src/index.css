@@ -212,3 +212,8 @@ button.primary:disabled { opacity: 0.6; cursor: progress; }
   .app { display: block; }
   .panel { border: 0; }
 }
+
+.map-buttons { position: absolute; top: 84px; right: 10px; z-index: 5; display: flex; flex-direction: column; gap: 6px; }
+.map-buttons button { background: var(--overlay); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: var(--shadow); }
+.map-buttons button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+@media (pointer: coarse) { .map-buttons button { min-height: 44px; } }

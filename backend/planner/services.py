@@ -30,7 +30,7 @@ TOKEN_SALT = "plan.v1"  # noqa: S105 (a namespace, not a secret)
 TOKEN_MAX_AGE_S = 2 * 3600
 HEATMAP_HOURS = 48  # the brief's window; the slider extends to cover longer trips
 MAX_HEATMAP_HOURS = 120
-MAX_DEPARTURE_AHEAD = timedelta(hours=72)
+MAX_DEPARTURE_AHEAD = timedelta(days=7)  # forecasts run 16 days; later hours are less reliable
 DEPARTURE_GRACE = timedelta(minutes=30)
 MIN_TRIP_MI = 1.0
 WEATHER_REQUEST_MAX = 1000  # Open-Meteo locations per request
@@ -70,7 +70,7 @@ def resolve_departure(local: str, tz_name: str, now: datetime) -> datetime:
     if utc < now - DEPARTURE_GRACE:
         raise PlanError("departure_past", "Departure is in the past")
     if utc > now + MAX_DEPARTURE_AHEAD:
-        raise PlanError("departure_too_far", "Departure must be within the next 72 hours")
+        raise PlanError("departure_too_far", "Departure must be within the next 7 days")
     return utc
 
 
