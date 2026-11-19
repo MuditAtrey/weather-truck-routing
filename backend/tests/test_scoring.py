@@ -93,3 +93,10 @@ def test_us_only_route_beats_a_faster_route_through_canada() -> None:
     assert "Border crossing" in r.reasons[0]
     both = rank([canada, summary(2, (272, 0, 0, 0, 0), trip_h=5.6, leaves_us=True)])
     assert both.recommended == 0
+
+
+def test_close_average_risks_are_shown_with_enough_digits() -> None:
+    a = summary(0, (88.0, 12.0, 0, 0, 0))  # avg 0.120
+    b = summary(1, (87.8, 12.2, 0, 0, 0))  # avg 0.122
+    r = rank([a, b])
+    assert "0.120 vs 0.122" in r.reasons[0]

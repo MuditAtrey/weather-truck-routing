@@ -132,6 +132,14 @@ class Ranking:
     reasons: dict[int, str]  # one sentence per route
 
 
+def _pair(criterion: str, a: float, b: float) -> tuple[str, str]:
+    """Format two differing values so the difference is visible (0.120 vs 0.122)."""
+    fa, fb = _fmt(criterion, a), _fmt(criterion, b)
+    if fa == fb and criterion == "avg_risk":
+        return f"{a:.3f}", f"{b:.3f}"
+    return fa, fb
+
+
 def _fmt(criterion: str, value: float) -> str:
     if criterion == "leaves_us":
         return "via Canada" if value else "US only"
@@ -169,10 +177,8 @@ def rank(summaries: Sequence[RouteSummary]) -> Ranking:
             reasons[s.route_id] = f"Ties with {names[best.route_id]} on every criterion."
         else:
             name, w, o = diff
-            reasons[s.route_id] = (
-                f"{CRITERION_TEXT[name]}: {_fmt(name, o)} vs {_fmt(name, w)} "
-                f"on {names[best.route_id]}."
-            )
+            fo, fw = _pair(name, o, w)
+            reasons[s.route_id] = f"{CRITERION_TEXT[name]}: {fo} vs {fw} on {names[best.route_id]}."
 
     if all(s.known_mi <= 0 for s in summaries):
         status: Literal["ok", "all_no_travel", "weather_incomplete", "no_weather"] = "no_weather"
@@ -191,8 +197,9 @@ def rank(summaries: Sequence[RouteSummary]) -> Ranking:
             reasons[best.route_id] = f"Ties with {runner} on every criterion; listed first."
         else:
             name, w, o = diff
+            fw, fo = _pair(name, w, o)
             reasons[best.route_id] = (
-                f"{CRITERION_TEXT[name]}: {_fmt(name, w)} vs {_fmt(name, o)} on {runner}"
+                f"{CRITERION_TEXT[name]}: {fw} vs {fo} on {runner}"
                 f"{'; equal on all weather criteria' if name == 'trip_min' else ''}."
             )
     else:
