@@ -62,9 +62,11 @@ interface Props {
   busy: boolean
   onSubmit: (req: PlanIn, labels: [string, string]) => void
   onCancel: () => void
+  /** Called with the request the form would send, so the app can start planning early. */
+  onPrefetch?: (req: PlanIn) => void
 }
 
-export default function TripForm({ busy, onSubmit, onCancel }: Props) {
+export default function TripForm({ busy, onSubmit, onCancel, onPrefetch }: Props) {
   const [origin, setOrigin] = useState<PlaceOption | null>(null)
   const [destination, setDestination] = useState<PlaceOption | null>(null)
   const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone)
@@ -94,11 +96,9 @@ export default function TripForm({ busy, onSubmit, onCancel }: Props) {
   const cargoNum = Number(cargo)
   const cargoValid = cargo.trim() !== '' && Number.isInteger(cargoNum) && cargoNum >= 0 && cargoNum <= 80000
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!origin || !destination) return setError('Pick an origin and a destination from the suggestions.')
-    if (!cargoValid) return setError('Cargo weight must be a whole number from 0 to 80,000 lb.')
-    setError('')
+  /** The request the form would send right now (departure resolved in the origin's zone). */
+  const buildRequest = async (): Promise<PlanIn | null> => {
+    if (!origin || !destination || !cargoValid) return null
     // An untouched departure means "leave soon": compute it now, in the origin's zone, so
     // a slow zone lookup or a page left open for an hour can't send a stale or wrong time.
     let dep = departure
@@ -108,17 +108,39 @@ export default function TripForm({ busy, onSubmit, onCancel }: Props) {
       setTz(zone)
       setDeparture(dep)
     }
-    onSubmit(
-      {
-        origin: { lat: origin.lat, lon: origin.lon, label: origin.label },
-        destination: { lat: destination.lat, lon: destination.lon, label: destination.label },
-        departure_local: dep,
-        cargo_lb: cargoNum,
-        interval_mi: interval,
-        hos,
-      },
-      [origin.label, destination.label],
-    )
+    return {
+      origin: { lat: origin.lat, lon: origin.lon, label: origin.label },
+      destination: { lat: destination.lat, lon: destination.lon, label: destination.label },
+      departure_local: dep,
+      cargo_lb: cargoNum,
+      interval_mi: interval,
+      hos,
+    }
+  }
+
+  // Start planning in the background once the trip is fully described; the truck legs of
+  // a long trip take 15-30 s, most of which then passes while the user checks the form.
+  useEffect(() => {
+    if (!onPrefetch || busy || !origin || !destination || !cargoValid) return
+    let current = true
+    const t = window.setTimeout(async () => {
+      const req = await buildRequest()
+      if (current && req) onPrefetch(req)
+    }, 600)
+    return () => {
+      current = false
+      window.clearTimeout(t)
+    }
+    // buildRequest reads exactly the state listed here.
+  }, [origin, destination, cargo, interval, hos, departure, departureTouched, busy])
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!origin || !destination) return setError('Pick an origin and a destination from the suggestions.')
+    if (!cargoValid) return setError('Cargo weight must be a whole number from 0 to 80,000 lb.')
+    setError('')
+    const req = await buildRequest()
+    if (req) onSubmit(req, [origin.label, destination.label])
   }
 
   const usePreset = (p: Preset) => {

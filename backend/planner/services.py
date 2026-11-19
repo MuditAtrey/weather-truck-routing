@@ -145,6 +145,17 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
                     "source": route.source,
                     "via": bool(route.via),
                     "warnings": sorted(set(route.warnings)),
+                    "stops": [
+                        {
+                            "kind": st.kind,
+                            "lat": round(st.point[0], 5),
+                            "lon": round(st.point[1], 5),
+                            "mile": round(st.mile, 1),
+                            "at": round(dep_epoch + st.elapsed_s),
+                            "duration_s": round(st.duration_s),
+                        }
+                        for st in (cp.rest_stops(route) if req.hos else [])
+                    ],
                 },
                 rid + 1,
             )

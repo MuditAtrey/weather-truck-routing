@@ -68,7 +68,9 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
       <div className="slider">
         <div className="slider-label">
           <strong>{clock(t, timeZone)}</strong>
-          <span className="muted">hour {hour} of {max} after departure</span>
+          <span className={hour > 48 ? 'late' : 'muted'}>
+            hour {hour} of {max} after departure{hour > 48 ? ' · beyond 48 h, forecasts are less reliable' : ''}
+          </span>
         </div>
         <input
           type="range"
@@ -84,11 +86,9 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
           aria-label="Forecast hour"
         />
         <div className="ticks" aria-hidden>
-          <span>0 h</span>
-          <span>12 h</span>
-          <span>24 h</span>
-          <span>36 h</span>
-          <span>48 h</span>
+          {Array.from({ length: 5 }, (_, k) => (
+            <span key={k}>{Math.round((max * k) / 4)} h</span>
+          ))}
         </div>
       </div>
       <div className="toggles">

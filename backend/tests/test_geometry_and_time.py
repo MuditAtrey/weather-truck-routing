@@ -198,3 +198,12 @@ def test_join_removes_an_out_and_back_spur_at_the_joint() -> None:
     assert j.distance_mi == pytest.approx(20.0, rel=0.01)  # the 6-mile spur is gone
     assert j.drive_s == pytest.approx(20 * 60.0)  # and so is its time
     assert all(lon == 0.0 for _, lon in j.coords)
+
+
+def test_rest_stops_fall_where_the_driving_hours_run_out() -> None:
+    route = _straight_route(1300.0, mph=60)  # 21.7 hours of driving
+    stops = checkpoints.rest_stops(route)
+    assert [s.kind for s in stops] == ["break", "rest", "break"]
+    assert [round(s.mile) for s in stops] == [480, 660, 1140]  # 8 h, 11 h, 19 h at 60 mph
+    assert stops[1].elapsed_s == pytest.approx(11.5 * 3600)  # after the first break
+    assert checkpoints.mile_at_drive_seconds(route, 3600) == pytest.approx(60, rel=1e-3)

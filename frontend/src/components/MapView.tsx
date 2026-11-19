@@ -93,6 +93,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       map.addSource('segments', { type: 'geojson', data: EMPTY })
       map.addSource('checkpoints', { type: 'geojson', data: EMPTY })
       map.addSource('truck', { type: 'geojson', data: EMPTY })
+      map.addSource('stops', { type: 'geojson', data: EMPTY })
       map.addLayer(
         {
           id: 'route-casing',
@@ -134,6 +135,18 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 5.5, 0, 6.5, 1],
           'circle-stroke-color': ['case', ['==', ['feature-state', 'level'], 4], '#111827', '#ffffff'],
           'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 8, 1.5],
+        },
+      })
+      map.addLayer({
+        id: 'stops',
+        type: 'circle',
+        source: 'stops',
+        filter: ['==', ['get', 'route'], -1],
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['case', ['==', ['get', 'kind'], 'rest'], '#111827', '#ffffff'],
+          'circle-stroke-color': '#111827',
+          'circle-stroke-width': 2.5,
         },
       })
       map.addLayer({
@@ -185,6 +198,22 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       map.on('mousemove', layer, showCheckpoint)
       map.on('mouseleave', layer, hide)
     }
+    map.on('mousemove', 'stops', (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0]
+      const p = live.current.plan
+      if (!f || !p) return
+      map.getCanvas().style.cursor = 'pointer'
+      const props = f.properties as { kind: string; mile: number; at: number }
+      popup
+        .setLngLat(e.lngLat)
+        .setHTML(
+          `<div class="pop"><b>${props.kind === 'rest' ? '10-hour rest' : '30-minute break'}</b>` +
+            `<div>Mile ${Math.round(props.mile).toLocaleString('en-US')}</div>` +
+            `<div>Starts ${clock(props.at, p.timezone)}</div><div class="muted">Required by hours-of-service rules</div></div>`,
+        )
+        .addTo(map)
+    })
+    map.on('mouseleave', 'stops', hide)
     map.on('click', 'route-line', (e) => {
       const r = e.features?.[0]?.properties?.id
       if (typeof r === 'number') live.current.onSelect(r)
@@ -209,6 +238,16 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     src('segments').setData(segments ?? EMPTY)
     src('checkpoints').setData(plan?.checkpoints ?? EMPTY)
     src('truck').setData(EMPTY)
+    src('stops').setData({
+      type: 'FeatureCollection',
+      features: (plan?.routes.features ?? []).flatMap((r) =>
+        (r.properties.stops ?? []).map((st) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [st.lon, st.lat] },
+          properties: { route: r.properties.id, kind: st.kind, mile: st.mile, at: st.at },
+        })),
+      ),
+    })
     // A canvas source is bound to one canvas, so each plan gets a fresh source.
     if (map.getLayer('heat')) map.removeLayer('heat')
     if (map.getSource('heat')) map.removeSource('heat')
@@ -248,6 +287,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     map.setPaintProperty('route-casing', 'line-width', ['case', isSel, 10, 6] as never)
     map.setFilter('route-risk', ['==', ['get', 'route'], selected])
     map.setFilter('cp', ['==', ['get', 'route'], selected])
+    map.setFilter('stops', ['==', ['get', 'route'], selected])
   }, [selected, ready, plan])
 
   // Checkpoint and segment colours for the current wind mode.

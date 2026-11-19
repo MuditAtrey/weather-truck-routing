@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Plan, type PlanIn, type ScoreOut } from './api/client'
+import ExportBar from './components/ExportBar'
 import Legend from './components/Legend'
 import RouteCards from './components/RouteCards'
 import Timeline from './components/Timeline'
@@ -53,6 +54,16 @@ export default function App() {
   const [serverWeather, setServerWeather] = useState(false)
   const ctrl = useRef<AbortController | null>(null)
   const lastRequest = useRef<PlanIn | null>(null)
+  // A plan started in the background before the user pressed Plan (same request = reuse).
+  const prefetched = useRef<{ key: string; plan: Promise<Plan> } | null>(null)
+
+  const prefetch = useCallback((req: PlanIn) => {
+    const key = JSON.stringify(req)
+    if (prefetched.current?.key === key) return
+    const plan = api.plan(req)
+    plan.catch(() => undefined) // reported if the user actually submits it
+    prefetched.current = { key, plan }
+  }, [])
 
   // Wake the API early so a cold serverless start overlaps with the user typing.
   useEffect(() => {
@@ -112,7 +123,10 @@ export default function App() {
     setScore(null)
     hourStore.set(0)
     try {
-      const p = await api.plan(req, c.signal)
+      const key = JSON.stringify(req)
+      const early = prefetched.current?.key === key ? prefetched.current.plan : null
+      const p = early ? await early : await api.plan(req, c.signal)
+      if (c.signal.aborted) return
       setPlan(p)
       setSelected(0)
       await runWeather(p, c.signal)
@@ -161,7 +175,7 @@ export default function App() {
           </div>
         </header>
 
-        <TripForm busy={busy} onSubmit={start} onCancel={cancel} />
+        <TripForm busy={busy} onSubmit={start} onCancel={cancel} onPrefetch={prefetch} />
 
         <section className="results" aria-live="polite" aria-busy={busy}>
           {phase.kind === 'routing' && (
@@ -214,6 +228,7 @@ export default function App() {
                 </p>
               )}
               <RouteCards plan={plan} result={result} selected={selected} onSelect={setSelected} />
+              <ExportBar plan={plan} selected={selected} labels={labels} />
               <p className="footnote muted">
                 Risk is rated at each checkpoint, at the truck’s estimated arrival time, and each checkpoint counts for
                 the road halfway to its neighbours. Ranking: US-only routes first, then fewest No Travel, Severe and High miles,

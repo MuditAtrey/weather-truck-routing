@@ -128,3 +128,14 @@ button.ghost { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;
   .toggles { width: 100%; justify-content: space-between; }
   .legend-toggle .legend-chip:nth-child(n + 3) { display: none; }
 }
+
+.export { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.export h3 { font-size: 13px; margin: 0; }
+.export-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.export-actions .ghost { font-size: 13px; padding: 6px 10px; text-decoration: none; color: var(--ink); display: inline-block; }
+.export-actions .ghost:hover { border-color: var(--accent); }
+.small { font-size: 12px; margin: 0; }
+.stops { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.stop-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--ink); background: #fff; margin-right: 6px; vertical-align: -1px; }
+.stop-dot.rest { background: var(--ink); }
+.slider-label .late { color: #b45309; }

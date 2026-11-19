@@ -70,3 +70,36 @@ def build(route: Route, interval_mi: float, with_hos: bool) -> list[Checkpoint]:
             )
         )
     return out
+
+
+def mile_at_drive_seconds(route: Route, seconds: float) -> float:
+    """Inverse of drive_seconds_at: how far the truck has driven after `seconds`."""
+    t = route.cum_drive_s
+    if seconds <= 0:
+        return 0.0
+    if seconds >= t[-1]:
+        return route.distance_mi
+    i = bisect_right(t, seconds) - 1
+    span = t[i + 1] - t[i]
+    f = 0.0 if span == 0 else (seconds - t[i]) / span
+    return route.cum_mi[i] + (route.cum_mi[i + 1] - route.cum_mi[i]) * f
+
+
+@dataclass(frozen=True, slots=True)
+class Stop:
+    kind: str  # "break" (30 min) or "rest" (10 h)
+    point: LatLon
+    mile: float
+    elapsed_s: float  # wall-clock time from departure when the stop starts
+    duration_s: float
+
+
+def rest_stops(route: Route) -> list[Stop]:
+    """Where the hours-of-service breaks and rests fall on this route."""
+    out: list[Stop] = []
+    for drive_h, kind, hours in hos.stops(route.drive_s / 3600):
+        mile = mile_at_drive_seconds(route, drive_h * 3600)
+        point, _, _ = interpolate_along(route.coords, route.cum_mi, mile)
+        elapsed = hos.elapsed_hours(drive_h) * 3600
+        out.append(Stop(kind, point, mile, elapsed, hours * 3600))
+    return out

@@ -20,6 +20,7 @@ export interface RouteProps {
   source: 'valhalla' | 'osrm'
   via: boolean
   warnings: string[]
+  stops: { kind: 'break' | 'rest'; lat: number; lon: number; mile: number; at: number; duration_s: number }[]
 }
 export interface CheckpointProps {
   route: number
