@@ -3,6 +3,7 @@ import { api, ApiError, type Plan, type PlanIn, type ScoreOut } from './api/clie
 import ExportBar from './components/ExportBar'
 import Legend from './components/Legend'
 import RouteCards from './components/RouteCards'
+import Sheet, { type Detent } from './components/Sheet'
 import Timeline from './components/Timeline'
 import TripForm from './components/TripForm'
 import { clock } from './lib/format'
@@ -52,10 +53,13 @@ export default function App() {
   const [selected, setSelected] = useState(0)
   // Trucks are blown over by gusts, not average wind, so gusts drive the recommendation.
   const [mode, setMode] = useState<WindMode>('gust')
-  // The heatmap is a backdrop for "why", off until asked for; the route line carries the answer.
-  const [heatmapOn, setHeatmapOn] = useState(false)
+  // The heatmap shows the weather around the routes; it sits under the route line, faint enough not to compete.
+  const [heatmapOn, setHeatmapOn] = useState(true)
   const [checkpointsOn, setCheckpointsOn] = useState(true)
   const [follow, setFollow] = useState(false)
+  const isPhone = useMedia('(max-width: 899px)')
+  const [detent, setDetent] = useState<Detent>('half')
+  const [sheetH, setSheetH] = useState(0)
   const [serverWeather, setServerWeather] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
@@ -193,26 +197,20 @@ export default function App() {
   const status = result?.ranking.status
   const warnings = plan?.warnings.filter((w) => WARNINGS[w]) ?? []
 
-  return (
-    <div className={`app${plan ? ' has-plan' : ''}`}>
-      <header className="brand">
-        <svg viewBox="0 0 32 32" aria-hidden className="logo">
-          <rect width="32" height="32" rx="8" />
-          <path d="M7 21h14v-8h4l3 4v4h-2" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
-          <circle cx="11" cy="22" r="2" fill="#fff" />
-          <circle cx="23" cy="22" r="2" fill="#fff" />
-        </svg>
-        <h1>Weather-aware truck routing</h1>
-        <button
-          type="button"
-          className="theme-toggle"
-          onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')}
-          title="Colour theme: Auto follows your device"
-        >
-          {theme === 'auto' ? 'Auto' : theme === 'dark' ? 'Dark' : 'Light'}
-        </button>
-      </header>
-      <aside className="panel">
+  const phoneSheet = isPhone && !!plan
+  const timeline = plan ? (
+    <Timeline
+      plan={plan}
+      score={score}
+      selected={selected}
+      mode={mode}
+      onPlaying={(on) => {
+        if (on) setFollow(true)
+      }}
+    />
+  ) : null
+  const panelBody = (
+    <>
         {!plan && (
           <p className="intro muted">Three truck routes, rated on forecast gusts, rain and snow at the hour the truck reaches each place.</p>
         )}
@@ -229,7 +227,10 @@ export default function App() {
                 {lastRequest.current ? ` · ${lastRequest.current.cargo_lb.toLocaleString('en-US')} lb` : ''}
               </p>
             </div>
-            <button type="button" className="ghost" onClick={() => setEditing(true)} disabled={busy}>
+            <button type="button" className="ghost" onClick={() => {
+                setEditing(true)
+                setDetent('full')
+              }} disabled={busy}>
               Edit trip
             </button>
           </div>
@@ -244,6 +245,7 @@ export default function App() {
           folded={!!plan && !editing}
           onSubmit={(req, names) => {
             setEditing(false)
+            setDetent('half')
             void start(req, names)
           }}
           onCancel={cancel}
@@ -337,7 +339,38 @@ export default function App() {
             )}
           </details>
         </footer>
-      </aside>
+    </>
+  )
+
+  return (
+    <div
+      className={`app${plan ? ' has-plan' : ''}${phoneSheet ? ' phone-sheet' : ''}`}
+      style={phoneSheet ? ({ '--sheet-h': `${sheetH}px` } as React.CSSProperties) : undefined}
+    >
+      <header className="brand">
+        <svg viewBox="0 0 32 32" aria-hidden className="logo">
+          <rect width="32" height="32" rx="8" />
+          <path d="M7 21h14v-8h4l3 4v4h-2" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
+          <circle cx="11" cy="22" r="2" fill="#fff" />
+          <circle cx="23" cy="22" r="2" fill="#fff" />
+        </svg>
+        <h1>Weather-aware truck routing</h1>
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')}
+          title="Colour theme: Auto follows your device"
+        >
+          {theme === 'auto' ? 'Auto' : theme === 'dark' ? 'Dark' : 'Light'}
+        </button>
+      </header>
+      {phoneSheet ? (
+        <Sheet head={timeline} detent={detent} onDetent={setDetent} onHeight={setSheetH} top={54}>
+          {panelBody}
+        </Sheet>
+      ) : (
+        <aside className="panel">{panelBody}</aside>
+      )}
 
       <main className="stage">
         <Suspense fallback={<div className="map map-loading" />}>
@@ -356,26 +389,29 @@ export default function App() {
             onHeatmap={setHeatmapOn}
             onCheckpoints={setCheckpointsOn}
             dark={dark}
+            bottomInset={phoneSheet ? sheetH : 0}
           />
         </Suspense>
         {plan && <Legend mode={mode} />}
-        {plan && (
-          <Timeline
-            plan={plan}
-            score={score}
-            selected={selected}
-            mode={mode}
-            onPlaying={(on) => {
-              if (on) setFollow(true)
-            }}
-          />
-        )}
+        {plan && !phoneSheet && timeline}
       </main>
     </div>
   )
 }
 
 type Theme = 'auto' | 'light' | 'dark'
+
+function useMedia(query: string): boolean {
+  const [on, setOn] = useState(() => window.matchMedia?.(query).matches ?? false)
+  useEffect(() => {
+    const mq = window.matchMedia?.(query)
+    if (!mq) return
+    const fn = (e: MediaQueryListEvent) => setOn(e.matches)
+    mq.addEventListener('change', fn)
+    return () => mq.removeEventListener('change', fn)
+  }, [query])
+  return on
+}
 
 function useSystemDark(): boolean {
   const query = '(prefers-color-scheme: dark)'

@@ -10,11 +10,12 @@
 //   cp             checkpoint dots, only when zoomed in and switched on
 //   marks          start, destination, stops and one warning per risky stretch, drawn
 //                  with the same symbols as the timeline, itinerary and key
-//   truck          where the truck is at the slider's time, on the road, facing its way
+//   truck          (a DOM marker on top) where the truck is at the playhead, facing its way
 // Risk colours come from feature-state, so changing wind mode never re-uploads geometry.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Map as MlMap,
+  Marker,
   NavigationControl,
   Popup,
   setWorkerUrl,
@@ -32,7 +33,7 @@ import { stopPoint } from '../lib/export'
 import { clock, num } from '../lib/format'
 import { hazards } from '../lib/hazards'
 import { createHeatCanvas, decodeHours } from '../lib/heatCanvas'
-import { hourStore } from '../lib/hourStore'
+import { hourStore, timeAt } from '../lib/hourStore'
 import {
   DRIVERS,
   LEVEL_COLORS,
@@ -58,7 +59,7 @@ const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
 /** Draw order of the symbols, top first (a higher sort key draws on top). */
 const SORT: Partial<Record<SymbolId, number>> = { end: 7, start: 6, notravel: 5, rest: 4, 'rest-unknown': 4, break: 3, 'break-unknown': 3, severe: 2, high: 2 }
-const TWEEN_MS = 420
+const GLIDE_MS = 350
 const FOLLOW_ZOOM = 7.5
 
 const levelColor = (low: string) =>
@@ -93,10 +94,12 @@ interface Props {
   onHeatmap: (on: boolean) => void
   onCheckpoints: (on: boolean) => void
   dark: boolean
+  /** Height of the phone's bottom sheet: the map keeps its centre above it. */
+  bottomInset: number
 }
 
 export default function MapView(props: Props) {
-  const { plan, score, mode, selected, heatmapOn, checkpointsOn, follow, onFollow, dark } = props
+  const { plan, score, mode, selected, heatmapOn, checkpointsOn, follow, onFollow, dark, bottomInset } = props
   const el = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
   // Bumped on every style load: switching light/dark replaces all layers, so every
@@ -106,6 +109,7 @@ export default function MapView(props: Props) {
   const [layersOpen, setLayersOpen] = useState(false)
   const fitted = useRef<Plan | null>(null)
   const followEaseUntil = useRef(0)
+  const fittedAt = useRef(0)
   const live = useRef(props)
   live.current = props
 
@@ -140,6 +144,10 @@ export default function MapView(props: Props) {
       ;(window as unknown as { __map: MlMap }).__map = map
     }
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
+    // Phones: keep the attribution folded to its (i) button; it opens on tap.
+    map.once('load', () => {
+      if (window.innerWidth < 900) el.current?.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show')
+    })
     map.touchZoomRotate.disableRotation()
 
     // Symbols are drawn synchronously (nothing to race the style load) and re-added
@@ -156,7 +164,7 @@ export default function MapView(props: Props) {
       const dk = live.current.dark
       // Lines go under the first label layer so place names stay readable.
       const before = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
-      for (const id of ['routes', 'segments', 'checkpoints', 'marks', 'truck']) map.addSource(id, { type: 'geojson', data: EMPTY })
+      for (const id of ['routes', 'segments', 'checkpoints', 'marks']) map.addSource(id, { type: 'geojson', data: EMPTY })
       const round = { 'line-join': 'round', 'line-cap': 'round' } as const
       const width = (z4: number, z8: number, z12: number) =>
         ['interpolate', ['linear'], ['zoom'], 4, z4, 8, z8, 12, z12] as unknown as number
@@ -210,17 +218,6 @@ export default function MapView(props: Props) {
           'icon-image': ['get', 'sym'],
           'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.85, 10, 1.1],
           'symbol-sort-key': ['get', 'sort'],
-          'icon-allow-overlap': true,
-          'icon-ignore-placement': true,
-        },
-      })
-      map.addLayer({
-        id: 'truck', type: 'symbol', source: 'truck',
-        layout: {
-          'icon-image': 'truck',
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 8, 1.1],
-          'icon-rotate': ['get', 'bearing'],
-          'icon-rotation-alignment': 'map',
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
         },
@@ -329,7 +326,6 @@ export default function MapView(props: Props) {
     src('routes').setData(plan?.routes ?? EMPTY)
     src('segments').setData(segments ?? EMPTY)
     src('checkpoints').setData(plan?.checkpoints ?? EMPTY)
-    src('truck').setData(EMPTY)
     // A canvas source is bound to one canvas, so each plan gets a fresh source.
     if (map.getLayer('heat')) map.removeLayer('heat')
     if (map.getSource('heat')) map.removeSource('heat')
@@ -349,6 +345,7 @@ export default function MapView(props: Props) {
     }
     if (plan && plan.routes.features.length && fitted.current !== plan) {
       fitted.current = plan
+      fittedAt.current = performance.now()
       fitRoutes(map, plan)
     }
   }, [plan, segments, heat, ready])
@@ -405,29 +402,41 @@ export default function MapView(props: Props) {
     }
   }, [plan, score, mode, ready])
 
-  // Heatmap and truck follow the slider without React renders. The truck glides between
-  // hours instead of jumping, so playing the forecast looks like a drive.
+  // Heatmap and truck follow the playhead without React renders.
+  //
+  // The truck is a DOM marker, not a map layer: a layer's data goes through a worker and
+  // lands a frame or two late, so with the camera following it the truck shook against
+  // the map. A marker moves in the same frame as the camera. During playback the
+  // playhead advances a little every frame, so the truck simply sits at that exact time;
+  // a big jump (Depart, a click on the track) glides there instead of teleporting.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready || !plan || !track) return
     let raf = 0
     let drawn = -1
-    let shown = plan.hours[hourStore.get()] ?? plan.departure
+    let shown = timeAt(plan.hours, hourStore.get())
     let from = shown
     let target = shown
     let startedAt = 0
     let passed = new Set<number>()
     const cps = plan.checkpoints.features.map((f, i) => ({ i, mile: f.properties.mile, route: f.properties.route })).filter((c) => c.route === track.route)
-    const truckSrc = map.getSource('truck') as GeoJSONSource
     const heatSrc = map.getSource('heat') as CanvasSource | undefined
+    const el = document.createElement('div')
+    el.className = 'truck-marker'
+    el.innerHTML = symbolSvg('truck', MAP_SIZES.truck)
+    el.setAttribute('aria-label', SYMBOL_LABEL.truck)
+    const marker = new Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' })
+    if (new URLSearchParams(window.location.search).has('debug')) {
+      ;(window as unknown as { __truck: Marker }).__truck = marker
+    }
 
     const place = (t: number) => {
       const s = track.at(t)
-      truckSrc.setData({
-        type: 'FeatureCollection',
-        features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: s.pos }, properties: { bearing: s.bearing } }],
-      })
-      // Fade the road already driven (not once arrived: then the whole trip matters again).
+      // Camera first, then the marker, both in this frame.
+      if (live.current.follow && performance.now() > followEaseUntil.current) map.jumpTo({ center: s.pos })
+      marker.setLngLat(s.pos).setRotation(s.bearing)
+      if (!marker.getElement().isConnected) marker.addTo(map)
+      // Grey out the road already driven (not once arrived: then the whole trip matters again).
       const next = new Set<number>()
       if (s.status === 'driving' || s.status === 'stopped') for (const c of cps) if (c.mile < s.mile - 1) next.add(c.i)
       const mark = (i: number, v: boolean) => {
@@ -437,33 +446,39 @@ export default function MapView(props: Props) {
       for (const i of passed) if (!next.has(i)) mark(i, false)
       for (const i of next) if (!passed.has(i)) mark(i, true)
       passed = next
-      const f = live.current
-      if (f.follow && performance.now() > followEaseUntil.current) map.jumpTo({ center: s.pos })
     }
 
-    const frame = (now: number) => {
+    const glide = (now: number) => {
       raf = 0
-      const k = Math.min(1, (now - startedAt) / TWEEN_MS)
-      shown = from + (target - from) * (k < 1 ? 1 - (1 - k) * (1 - k) : 1)
+      const k = Math.min(1, (now - startedAt) / GLIDE_MS)
+      const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2 // ease in and out
+      shown = from + (target - from) * e
       place(shown)
-      if (k < 1) raf = requestAnimationFrame(frame)
+      if (k < 1) raf = requestAnimationFrame(glide)
     }
     const onHour = () => {
       const h = hourStore.get()
-      if (heat && heatHours && h !== drawn) {
-        const values = heatHours[h]
+      const idx = Math.max(0, Math.min(plan.hours.length - 1, Math.round(h)))
+      if (heat && heatHours && idx !== drawn) {
+        const values = heatHours[idx]
         if (values) {
           heat.draw(values)
-          drawn = h
+          drawn = idx
           // A paused canvas source re-uploads only when played; one frame is enough.
           heatSrc?.play()
           requestAnimationFrame(() => heatSrc?.pause())
         }
       }
+      target = timeAt(plan.hours, h)
+      if (raf) return // mid-glide: it heads for the new target and lands on it
+      if (Math.abs(target - shown) <= 1800) {
+        shown = target
+        place(shown)
+        return
+      }
       from = shown
-      target = plan.hours[h] ?? plan.departure
       startedAt = performance.now()
-      if (!raf) raf = requestAnimationFrame(frame)
+      raf = requestAnimationFrame(glide)
     }
     place(shown)
     onHour()
@@ -471,6 +486,7 @@ export default function MapView(props: Props) {
     return () => {
       unsub()
       cancelAnimationFrame(raf)
+      marker.remove()
       for (const i of passed) {
         map.setFeatureState({ source: 'segments', id: i + 1 }, { passed: false })
         map.setFeatureState({ source: 'checkpoints', id: i + 1 }, { passed: false })
@@ -482,10 +498,22 @@ export default function MapView(props: Props) {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready || !follow || !track || !plan) return
-    const s = track.at(plan.hours[hourStore.get()] ?? plan.departure)
+    const s = track.at(timeAt(plan.hours, hourStore.get()))
     followEaseUntil.current = performance.now() + 700
     map.easeTo({ center: s.pos, zoom: Math.max(map.getZoom(), FOLLOW_ZOOM), duration: 650 })
   }, [follow, ready, track, plan])
+
+  // Keep the map's centre (and the followed truck) in the part the sheet does not cover.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const padding = { top: 0, left: 0, right: 0, bottom: bottomInset }
+    // Right after a plan was framed, re-frame for the new space; otherwise just shift.
+    if (live.current.plan && performance.now() - fittedAt.current < 4000) {
+      map.setPadding(padding)
+      fitRoutes(map, live.current.plan)
+    } else map.easeTo({ padding, duration: 250 })
+  }, [bottomInset])
 
   useEffect(() => {
     const map = mapRef.current

@@ -204,6 +204,12 @@ details.section .small { padding: 0 12px 12px; }
 .chip-level { flex: none; font-size: 12px; font-weight: 700; padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--chip); display: inline-flex; align-items: center; gap: 5px; }
 .chip-level::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
 .small-btn { padding: 6px 10px; font-size: 13px; flex: none; }
+.tl-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+.tl-actions .seg button { padding: 6px 10px; font-size: 13px; }
+.depart { display: inline-flex; align-items: center; gap: 4px; }
+.depart svg { width: 12px; height: 12px; fill: currentColor; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+.wide-toggle { display: none; }
+.wide-toggle.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .tl-track { position: relative; padding-top: 2px; }
 .tl-strip { margin: 0 11px 4px; height: 10px; border-radius: 3px; background: var(--line); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08); }
 .tl-track input { display: block; width: 100%; accent-color: var(--accent); height: 28px; margin: 0; }
@@ -215,6 +221,7 @@ details.section .small { padding: 0 12px 12px; }
 .tl-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .tl-ticks span::before { content: ''; position: absolute; left: 50%; top: -4px; height: 3px; border-left: 1px solid var(--border); }
 
+.truck-marker { pointer-events: none; line-height: 0; filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.35)); }
 .pop { font-size: 13px; line-height: 1.5; color: #111827; }
 .pop-head { display: flex; gap: 6px; align-items: center; margin-bottom: 2px; }
 .pop-risk { font-weight: 700; }
@@ -233,20 +240,42 @@ details.section .small { padding: 0 12px 12px; }
   .app { display: flex; flex-direction: column; height: auto; min-height: 100%; }
   .brand { order: 0; position: sticky; top: 0; height: 54px; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand h1 { font-size: 16px; }
-  .panel { order: 1; border-right: 0; overflow: visible; padding-top: 12px; }
-  .stage { order: 2; display: flex; flex-direction: column; }
-  .has-plan .panel { order: 2; }
-  .has-plan .stage { order: 1; }
-  .stage .map { position: relative; inset: auto; height: 55svh; flex: none; }
-  .stage .timeline { position: sticky; top: 54px; margin: 0; border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--line); padding: 8px 12px; background: var(--panel); }
+  .panel { order: 1; border-right: 0; overflow: visible; padding-top: 12px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .stage { order: 2; height: 50svh; flex: none; }
   .legend { max-width: calc(100% - 70px); }
   .legend-toggle .legend-chip:nth-child(n + 4) { display: none; }
   .map-buttons { top: 84px; }
   .map-buttons > button, .layers > button { padding: 0; width: 44px; height: 44px; justify-content: center; }
-  .map-buttons svg { width: 20px; height: 20px; }
   .map-buttons > button span, .layers > button span { display: none; }
+  .map-buttons svg { width: 20px; height: 20px; }
   .layers-pop { position: absolute; top: 0; right: 52px; }
   .key-symbols { grid-template-columns: 1fr; }
+
+  /* With results: full-screen map, results in a bottom sheet (no page scroll, so a
+     one-finger drag on the map always pans the map). */
+  .phone-sheet { height: 100svh; min-height: 0; overflow: hidden; }
+  .phone-sheet .stage { position: fixed; top: 54px; left: 0; right: 0; bottom: 0; height: auto; }
+  .phone-sheet .maplibregl-ctrl-bottom-right, .phone-sheet .maplibregl-ctrl-bottom-left { bottom: var(--sheet-h, 0); transition: bottom 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 0; gap: 0; display: flex; flex-direction: column; overflow: hidden;
+    border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgb(0 0 0 / 0.18); border: 0; border-top: 1px solid var(--line);
+    transition: height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1); will-change: height; }
+  .sheet.dragging { transition: none; }
+  .sheet-head { flex: none; }
+  .grabber { height: 22px; display: grid; place-items: center; cursor: grab; touch-action: none; }
+  .grabber span { width: 40px; height: 5px; border-radius: 3px; background: var(--border); }
+  .sheet .timeline { position: static; box-shadow: none; border-radius: 0; background: none; padding: 0 12px 8px; border-bottom: 1px solid var(--line); }
+  .sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding: 12px 16px calc(24px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
+  .tl-top { gap: 10px; }
+  .tl-where > span:last-child { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .tl-route { display: none; }
+  .tl-time strong { font-size: 15px; }
+  .tl-actions { gap: 6px; }
+  .tl-actions .small-btn { min-width: 40px; min-height: 40px; padding: 0 8px; justify-content: center; }
+  .wide-seg, .depart span { display: none; }
+  .wide-toggle { display: inline-flex; align-items: center; }
+  .tl-time { gap: 6px; }
+  .credits { margin-top: 8px; }
 }
 @media print {
   .stage, .trip, .presets, .export-actions, .leg-links, .credits, .theme-toggle { display: none !important; }

@@ -16,8 +16,9 @@ Stack: React 19 + TypeScript + MapLibre GL (Vite) on the front end, Django 6 + D
 4. **A recommendation** using the brief's order: fewest Severe miles, then fewest High miles, then lowest average risk, then shortest time. Each route gets one line explaining the deciding criterion.
 5. **Rest stops at real places.** The 30-minute break and 10-hour rest go to the latest truck stop or rest area before the legal limit (4,687 sites from OpenStreetMap and U.S. DOT data), not to wherever the clock runs out. Stops with no known parking nearby are flagged.
 6. **A map** with all three routes. The selected one is coloured by risk with a dark outline; the others are grey. One warning sign marks the worst point of each High, Severe or No Travel stretch (No Travel stretches are also dashed), and hovering anywhere on a route shows that place's forecast. Start, destination, breaks and rests use the same symbols on the map, the timeline, the itinerary and the key.
-7. **A trip timeline.** Drag or play it and a truck drives the route on the road itself, standing still during breaks and rests, with the road behind it greyed out. A strip under the slider shows the risk the truck meets each hour, and the readout names where it is ("Driving, mile 412 near Rawlins, WY · gusts 38 mph"). The slider covers the 48 hours the brief asks for, or the whole trip when it is longer. The map follows the truck while playing; dragging the map stops following and "Whole route" zooms back out. The weather heatmap, checkpoint dots and the gusts/sustained setting are under Layers.
-8. **Send to the driver.** Per-leg links that open Google Maps, Apple Maps or Waze from one stop to the next, whole-trip links (Apple keeps all stops; Google a day at a time, 9 stops per link), a GPX file with the exact route and stops (validated against the GPX 1.1 schema), and a plain-text itinerary to copy. Each link format was checked in a browser for what it really opens.
+7. **A trip timeline.** Drag or play it and a truck drives the route on the road itself, at a steady speed, standing still during breaks and rests, with the road behind it greyed out. A strip under the slider shows the risk the truck meets each hour, and the readout names where it is ("Driving, mile 412 near Rawlins, WY · gusts 38 mph"). The slider fits the trip by default; one tap widens it to the full 48-hour window the heatmap covers (or longer, for trips over 48 hours). The map follows the truck while playing; dragging the map stops following and "Whole route" zooms back out. The weather heatmap, checkpoint dots and the gusts/sustained setting are under Layers.
+8. **Phones.** The map fills the screen and the results sit in a bottom sheet with three heights (the trip clock, half, full), like Google and Apple Maps, so a one-finger drag on the map always moves the map. The map keeps its centre, and the followed truck, above the sheet.
+9. **Send to the driver.** Per-leg links that open Google Maps, Apple Maps or Waze from one stop to the next, whole-trip links (Apple keeps all stops; Google a day at a time, 9 stops per link), a GPX file with the exact route and stops (validated against the GPX 1.1 schema), and a plain-text itinerary to copy. Each link format was checked in a browser for what it really opens.
 
 ## How it works
 
@@ -79,9 +80,9 @@ The load rules make heavier trucks riskier in wind, as the brief says. In practi
 Headless Chromium on an Apple M4:
 
 - **Heatmap slider:** stepping through all 49 hours, one per frame, takes the same time per frame as an idle page (20 ms per two frames; worst frame 21 ms). The hour lives outside React; each change redraws one small canvas.
-- **Playback:** the truck glides between hours (about 35 position updates in 4 s of play in both Chromium and Firefox), stays on the drawn road in every sample, and only changed segments get new map state.
+- **Playback:** the playhead advances every frame, so the truck moves continuously: in Chromium and Firefox, 0 of 300 frames over 50 ms on desktop, frame-to-frame speed steady (under 1% of frames change speed by more than half), the truck on the drawn road in every sample, and centred to the pixel while followed. The truck is a DOM marker, so it moves in the same frame as the camera instead of a frame behind it.
 - **Plans:** Dallas to Denver about 2 s; Detroit to Buffalo planned, forecast and scored in about 2 to 3 s; Seattle to Washington DC (truck legs) about 20 s the first time, under 3 s cached.
-- **Bundle (gzip):** app 88 KB; the map (MapLibre) loads separately at about 300 KB, in parallel with the form.
+- **Bundle (gzip):** app 90 KB; the map (MapLibre) loads separately at about 300 KB, in parallel with the form.
 
 ## Running it locally
 
