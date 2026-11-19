@@ -11,7 +11,7 @@ api = NinjaAPI(
     title="Weather-aware truck routing",
     version="1.0.0",
     description="Plans three truck routes and scores them against forecast weather.",
-    throttle=[AnonRateThrottle("40/m")],
+    throttle=[AnonRateThrottle("200/m")],  # upstream servers have their own 1/s gate
 )
 
 ROUTING_MESSAGES = {
