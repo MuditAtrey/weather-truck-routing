@@ -139,7 +139,8 @@ Code: MIT (see `LICENSE`). Data is not MIT:
 routes © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) via [FOSSGIS Valhalla](https://valhalla.openstreetmap.de) and [OSRM](https://project-osrm.org);
 weather by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0, non-commercial use);
 basemap by [OpenFreeMap](https://openfreemap.org) / OpenMapTiles;
-place search by [Photon](https://photon.komoot.io).
+place search by [Photon](https://photon.komoot.io);
+truck stops and parking from OpenStreetMap (ODbL; `backend/planner/data/truck_stops.json` is a derived database under ODbL, rebuilt with `scripts/truck_stops/build.py`) and the U.S. DOT BTS National Transportation Atlas Database, Truck Stop Parking (public domain, 2019).
 Places you type are sent to these services. There is no analytics or tracking.
 
 ## How this was built

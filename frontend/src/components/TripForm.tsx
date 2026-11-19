@@ -64,9 +64,11 @@ interface Props {
   onCancel: () => void
   /** Called with the request the form would send, so the app can start planning early. */
   onPrefetch?: (req: PlanIn) => void
+  /** On phones, hide the form behind "Edit trip" while results are showing. */
+  folded?: boolean
 }
 
-export default function TripForm({ busy, onSubmit, onCancel, onPrefetch }: Props) {
+export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded }: Props) {
   const [origin, setOrigin] = useState<PlaceOption | null>(null)
   const [destination, setDestination] = useState<PlaceOption | null>(null)
   const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone)
@@ -151,7 +153,7 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch }: Props
   }
 
   return (
-    <form className="trip" onSubmit={submit} noValidate>
+    <form className={`trip${folded ? ' folded' : ''}`} onSubmit={submit} noValidate>
       <PlaceInput label="Origin" value={origin} onChange={setOrigin} placeholder="City, address, or lat, lon" />
       <PlaceInput label="Destination" value={destination} onChange={setDestination} placeholder="City, address, or lat, lon" />
       <div className="row">

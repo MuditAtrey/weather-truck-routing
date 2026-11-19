@@ -53,7 +53,7 @@ def _straight_route(miles: float, mph: float = 60):
 
 def test_checkpoint_spacing_and_represented_miles_add_up() -> None:
     route = _straight_route(62.0)
-    cps = checkpoints.build(route, 25, with_hos=False)
+    cps = checkpoints.build(route, 25, None)
     assert [round(c.mile, 3) for c in cps] == [0, 25, 50, 62.0]
     assert [round(c.represented_mi, 3) for c in cps] == [12.5, 25, 18.5, 6.0]
     assert sum(c.represented_mi for c in cps) == pytest.approx(route.distance_mi)
@@ -68,7 +68,7 @@ def test_represented_miles_always_sum_to_route_length(total: float, interval: in
 
 
 def test_trip_shorter_than_interval_still_has_both_ends() -> None:
-    cps = checkpoints.build(_straight_route(4.0), 10, with_hos=False)
+    cps = checkpoints.build(_straight_route(4.0), 10, None)
     assert len(cps) == 2
     assert sum(c.represented_mi for c in cps) == pytest.approx(4.0, rel=1e-3)
 
@@ -200,10 +200,6 @@ def test_join_removes_an_out_and_back_spur_at_the_joint() -> None:
     assert all(lon == 0.0 for _, lon in j.coords)
 
 
-def test_rest_stops_fall_where_the_driving_hours_run_out() -> None:
-    route = _straight_route(1300.0, mph=60)  # 21.7 hours of driving
-    stops = checkpoints.rest_stops(route)
-    assert [s.kind for s in stops] == ["break", "rest", "break"]
-    assert [round(s.mile) for s in stops] == [480, 660, 1140]  # 8 h, 11 h, 19 h at 60 mph
-    assert stops[1].elapsed_s == pytest.approx(11.5 * 3600)  # after the first break
+def test_mile_at_drive_seconds_inverts_drive_time() -> None:
+    route = _straight_route(1300.0, mph=60)
     assert checkpoints.mile_at_drive_seconds(route, 3600) == pytest.approx(60, rel=1e-3)

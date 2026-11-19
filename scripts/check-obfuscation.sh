@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 files=$(git ls-files -- '*.js' '*.cjs' '*.mjs' '*.ts' '*.tsx' '*.py' '*.json' '*.sh' 'package.json' \
-  | grep -v -E '(^|/)(package-lock\.json|uv\.lock|openapi\.json)$|/fixtures/|schema\.d\.ts$' || true)
+  | grep -v -E '(^|/)(package-lock\.json|uv\.lock|openapi\.json)$|/fixtures/|/planner/data/|schema\.d\.ts$' || true)
 status=0
 
 for f in $files; do

@@ -1,14 +1,18 @@
 // Heatmap time control: native range input (keyboard and screen-reader friendly) plus a
 // play button. Moving it writes hourStore; the map repaints at most once per frame.
 import { useEffect, useRef, useState } from 'react'
-import { clock } from '../lib/format'
+import type { Plan, ScoreOut } from '../api/client'
+import { clock, num } from '../lib/format'
 import { hourStore, useHour } from '../lib/hourStore'
-import type { WindMode } from '../lib/risk'
+import { LEVELS, levelAt, type WindMode } from '../lib/risk'
 
 interface Props {
   hours: number[]
   departure: number
   timeZone: string
+  plan: Plan
+  score: ScoreOut | null
+  selected: number
   mode: WindMode
   onMode: (m: WindMode) => void
   heatmapOn: boolean
@@ -17,7 +21,28 @@ interface Props {
 
 const STEP_MS = 450
 
-export default function Timeline({ hours, departure, timeZone, mode, onMode, heatmapOn, onHeatmap }: Props) {
+/** Where the truck on the selected route is at time t, and the conditions it meets there. */
+function readout(plan: Plan, score: ScoreOut | null, mode: WindMode, route: number, t: number): string {
+  const cps = plan.checkpoints.features.map((f, i) => ({ f, i })).filter(({ f }) => f.properties.route === route)
+  const last = cps[cps.length - 1]
+  if (!last) return ''
+  const name = plan.routes.features[route]?.properties.name ?? ''
+  if (t >= last.f.properties.eta) return `Route ${name}: arrived`
+  // The checkpoint the truck is passing (the last one it has reached).
+  let at = cps[0]!
+  for (const c of cps) if (c.f.properties.eta <= t) at = c
+  const stop = plan.routes.features[route]?.properties.stops.find((s) => s.at <= t && t < s.at + s.duration_s)
+  const where = stop
+    ? `${stop.kind === 'rest' ? 'resting' : 'on break'}${stop.place ? ` at ${stop.place.name}` : ''}`
+    : `near mile ${Math.round(at.f.properties.mile).toLocaleString('en-US')}`
+  if (!score) return `Route ${name}: truck ${where}`
+  const c = score.conditions[at.i]
+  const lvl = levelAt(score[mode].checkpoint_levels, at.i)
+  const wind = mode === 'gust' ? `gusts ${num(c?.gust, 0, 'mph')}` : `wind ${num(c?.wind, 0, 'mph')}`
+  return `Route ${name}: truck ${where} · ${wind} · ${lvl === null ? 'no forecast' : LEVELS[lvl]}`
+}
+
+export default function Timeline({ hours, departure, timeZone, plan, score, selected, mode, onMode, heatmapOn, onHeatmap }: Props) {
   const hour = useHour()
   const [playing, setPlaying] = useState(false)
   const raf = useRef(0)
@@ -48,6 +73,16 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
   }, [playing, max])
 
   const t = hours[hour] ?? departure
+  const t0 = hours[0] ?? departure
+  const span = (hours[max] ?? departure) - t0 || 1
+  const route = plan.routes.features[selected]?.properties
+  const marks = route
+    ? [
+        { at: departure, cls: 'start', label: 'Depart' },
+        ...route.stops.map((s) => ({ at: s.at, cls: s.kind, label: s.kind === 'rest' ? 'Rest' : 'Break' })),
+        { at: departure + route.trip_s, cls: 'end', label: 'Arrive' },
+      ].filter((m) => m.at >= t0 && m.at <= t0 + span)
+    : []
   return (
     <div className="timeline" role="group" aria-label="Weather heatmap time">
       <button
@@ -69,9 +104,10 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
         <div className="slider-label">
           <strong>{clock(t, timeZone)}</strong>
           <span className={hour > 48 ? 'late' : 'muted'}>
-            hour {hour} of {max} after departure{hour > 48 ? ' · beyond 48 h, forecasts are less reliable' : ''}
+            +{hour} h{hour > 48 ? ' · beyond 48 h, forecasts are less reliable' : ''}
           </span>
         </div>
+        <div className="readout" aria-live="polite">{readout(plan, score, mode, selected, t)}</div>
         <input
           type="range"
           min={0}
@@ -85,9 +121,16 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
           aria-valuetext={clock(t, timeZone)}
           aria-label="Forecast hour"
         />
+        <div className="marks" aria-hidden>
+          {marks.map((m, i) => (
+            <span key={i} className={`mark ${m.cls}`} style={{ left: `${((m.at - t0) / span) * 100}%` }} title={`${m.label} ${clock(m.at, timeZone)}`}>
+              <i />
+            </span>
+          ))}
+        </div>
         <div className="ticks" aria-hidden>
           {Array.from({ length: 5 }, (_, k) => (
-            <span key={k}>{Math.round((max * k) / 4)} h</span>
+            <span key={k}>{clock(t0 + (span * k) / 4, timeZone, true).replace(/:00/, '')}</span>
           ))}
         </div>
       </div>

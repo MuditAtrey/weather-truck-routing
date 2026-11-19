@@ -11,10 +11,13 @@ checkpoints add up exactly to the route length:
 import math
 from bisect import bisect_right
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from . import hos
 from .geo import LatLon, interpolate_along
 from .route import Route
+
+if TYPE_CHECKING:
+    from .rest_stops import Schedule
 
 INTERVALS_MI = (10, 25, 50)
 
@@ -49,7 +52,8 @@ def checkpoint_miles(total_mi: float, interval_mi: float) -> list[float]:
     return miles
 
 
-def build(route: Route, interval_mi: float, with_hos: bool) -> list[Checkpoint]:
+def build(route: Route, interval_mi: float, schedule: "Schedule | None") -> list[Checkpoint]:
+    """Checkpoints with arrival times; `schedule` adds hours-of-service stops (None: none)."""
     miles = checkpoint_miles(route.distance_mi, interval_mi)
     out: list[Checkpoint] = []
     for k, mile in enumerate(miles):
@@ -58,7 +62,7 @@ def build(route: Route, interval_mi: float, with_hos: bool) -> list[Checkpoint]:
         represented = left + right
         point, _, _ = interpolate_along(route.coords, route.cum_mi, mile)
         drive_s = drive_seconds_at(route, mile)
-        elapsed_s = hos.elapsed_hours(drive_s / 3600) * 3600 if with_hos else drive_s
+        elapsed_s = schedule.elapsed(drive_s) if schedule else drive_s
         out.append(
             Checkpoint(
                 index=k,
@@ -83,23 +87,3 @@ def mile_at_drive_seconds(route: Route, seconds: float) -> float:
     span = t[i + 1] - t[i]
     f = 0.0 if span == 0 else (seconds - t[i]) / span
     return route.cum_mi[i] + (route.cum_mi[i + 1] - route.cum_mi[i]) * f
-
-
-@dataclass(frozen=True, slots=True)
-class Stop:
-    kind: str  # "break" (30 min) or "rest" (10 h)
-    point: LatLon
-    mile: float
-    elapsed_s: float  # wall-clock time from departure when the stop starts
-    duration_s: float
-
-
-def rest_stops(route: Route) -> list[Stop]:
-    """Where the hours-of-service breaks and rests fall on this route."""
-    out: list[Stop] = []
-    for drive_h, kind, hours in hos.stops(route.drive_s / 3600):
-        mile = mile_at_drive_seconds(route, drive_h * 3600)
-        point, _, _ = interpolate_along(route.coords, route.cum_mi, mile)
-        elapsed = hos.elapsed_hours(drive_h) * 3600
-        out.append(Stop(kind, point, mile, elapsed, hours * 3600))
-    return out

@@ -53,6 +53,27 @@ export default function App() {
   const [mode, setMode] = useState<WindMode>('gust')
   const [heatmapOn, setHeatmapOn] = useState(true)
   const [serverWeather, setServerWeather] = useState(false)
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      return (localStorage.getItem('theme') as Theme) || 'auto'
+    } catch {
+      return 'auto'
+    }
+  })
+  const systemDark = useSystemDark()
+  const dark = theme === 'dark' || (theme === 'auto' && systemDark)
+  useEffect(() => {
+    const el = document.documentElement
+    if (theme === 'auto') delete el.dataset.theme
+    else el.dataset.theme = theme
+    try {
+      localStorage.setItem('theme', theme)
+    } catch {
+      // private mode: theme just won't persist
+    }
+  }, [theme])
   const ctrl = useRef<AbortController | null>(null)
   const lastRequest = useRef<PlanIn | null>(null)
   // A plan started in the background before the user pressed Plan (same request = reuse).
@@ -77,6 +98,7 @@ export default function App() {
     let first = true
     const show = (s: ScoreOut) => {
       setScore(s)
+      setFetchedAt(Date.now())
       if (first) {
         first = false
         setSelected(s[mode].ranking.recommended ?? s[mode].ranking.order[0] ?? 0)
@@ -161,7 +183,7 @@ export default function App() {
   const warnings = plan?.warnings.filter((w) => WARNINGS[w]) ?? []
 
   return (
-    <div className="app">
+    <div className={`app${plan && !editing ? ' has-plan' : ''}`}>
       <aside className="panel">
         <header className="brand">
           <svg viewBox="0 0 32 32" aria-hidden className="logo">
@@ -170,13 +192,35 @@ export default function App() {
             <circle cx="11" cy="22" r="2" fill="#fff" />
             <circle cx="23" cy="22" r="2" fill="#fff" />
           </svg>
-          <div>
+          <div className="brand-text">
             <h1>Weather-aware truck routing</h1>
             <p className="muted">Three routes, scored on forecast wind, rain and snow at the truck’s arrival time.</p>
           </div>
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')}
+            title="Colour theme: follows your device on Auto"
+          >
+            {theme === 'auto' ? 'Auto' : theme === 'dark' ? 'Dark' : 'Light'}
+          </button>
         </header>
 
-        <TripForm busy={busy} onSubmit={start} onCancel={cancel} onPrefetch={prefetch} />
+        {plan && !editing && (
+          <button type="button" className="ghost edit-trip" onClick={() => setEditing(true)}>
+            Edit trip
+          </button>
+        )}
+        <TripForm
+          busy={busy}
+          folded={!!plan && !editing}
+          onSubmit={(req, names) => {
+            setEditing(false)
+            void start(req, names)
+          }}
+          onCancel={cancel}
+          onPrefetch={prefetch}
+        />
 
         <section className="results" aria-live="polite" aria-busy={busy}>
           {phase.kind === 'routing' && (
@@ -216,6 +260,13 @@ export default function App() {
                     : 'Car routing · OSRM'}
                 </span>
               </div>
+              {fetchedAt && score && (
+                <p className="freshness">
+                  Forecast from Open-Meteo{serverWeather ? ' (via the server)' : ''}, fetched{' '}
+                  {new Date(fetchedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} your time.
+                  Risk is rated on {mode === 'gust' ? 'gusts' : 'sustained wind'}.
+                </p>
+              )}
               {plan.router.fallback_reason && <p className="notice info">{FALLBACK[plan.router.fallback_reason]}</p>}
               {warnings.map((w) => (
                 <p key={w} className="notice info">
@@ -228,7 +279,7 @@ export default function App() {
                   This network’s weather quota is used up, so the server downloaded the forecasts instead.
                 </p>
               )}
-              <RouteCards plan={plan} result={result} selected={selected} onSelect={setSelected} />
+              <RouteCards plan={plan} score={score} mode={mode} result={result} selected={selected} onSelect={setSelected} />
               <ExportBar plan={plan} selected={selected} labels={labels} />
               <p className="footnote muted">
                 Risk is rated at each checkpoint, at the truck’s estimated arrival time, and each checkpoint counts for
@@ -248,7 +299,8 @@ export default function App() {
           <a href="https://project-osrm.org">OSRM</a> (
           <a href="https://www.openstreetmap.org/fixthemap">fix the map</a>). Weather by{' '}
           <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0). Places by{' '}
-          <a href="https://photon.komoot.io">Photon</a>. Non-commercial demo; places you type are sent to these services.
+          <a href="https://photon.komoot.io">Photon</a>. Truck parking: OpenStreetMap (ODbL) and U.S. DOT BTS NTAD
+          Truck Stop Parking (2019). Non-commercial demo; places you type are sent to these services.
           {import.meta.env.VITE_OPERATOR_EMAIL && (
             <>
               {' '}Contact: <a href={`mailto:${import.meta.env.VITE_OPERATOR_EMAIL}`}>{import.meta.env.VITE_OPERATOR_EMAIL}</a>.
@@ -259,7 +311,7 @@ export default function App() {
 
       <main className="stage">
         <Suspense fallback={<div className="map map-loading" />}>
-          <MapView plan={plan} score={score} mode={mode} selected={selected} heatmapOn={heatmapOn} onSelect={setSelected} />
+          <MapView plan={plan} score={score} mode={mode} selected={selected} heatmapOn={heatmapOn} onSelect={setSelected} dark={dark} />
         </Suspense>
         <Legend />
         {plan && (
@@ -267,6 +319,9 @@ export default function App() {
             hours={plan.hours}
             departure={plan.departure}
             timeZone={plan.timezone}
+            plan={plan}
+            score={score}
+            selected={selected}
             mode={mode}
             onMode={setMode}
             heatmapOn={heatmapOn}
@@ -276,6 +331,21 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+type Theme = 'auto' | 'light' | 'dark'
+
+function useSystemDark(): boolean {
+  const query = '(prefers-color-scheme: dark)'
+  const [dark, setDark] = useState(() => window.matchMedia?.(query).matches ?? false)
+  useEffect(() => {
+    const mq = window.matchMedia?.(query)
+    if (!mq) return
+    const on = (e: MediaQueryListEvent) => setDark(e.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return dark
 }
 
 function straightKm(r: PlanIn): number {

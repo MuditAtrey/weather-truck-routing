@@ -20,7 +20,25 @@ export interface RouteProps {
   source: 'valhalla' | 'osrm'
   via: boolean
   warnings: string[]
-  stops: { kind: 'break' | 'rest'; lat: number; lon: number; mile: number; at: number; duration_s: number }[]
+  stops: {
+    kind: 'break' | 'rest'
+    lat: number
+    lon: number
+    mile: number
+    at: number
+    duration_s: number
+    early_min: number
+    place: {
+      name: string
+      kind: 'truck_stop' | 'public' | 'truck_parking'
+      road: string | null
+      spaces: number | null
+      off_route_mi: number
+      lat: number
+      lon: number
+      source: string
+    } | null
+  }[]
 }
 export interface CheckpointProps {
   route: number

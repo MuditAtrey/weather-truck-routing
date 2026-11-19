@@ -29,8 +29,10 @@ import { routeSegments } from '../lib/segments'
 
 setWorkerUrl(workerUrl)
 
-const STYLE = 'https://tiles.openfreemap.org/styles/positron'
-const LABEL_LAYER = 'waterway_line_label' // first label layer in Positron: data goes under labels
+const STYLES = {
+  light: 'https://tiles.openfreemap.org/styles/positron',
+  dark: 'https://tiles.openfreemap.org/styles/dark',
+}
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
 const SELECTED_LOW = '#1e3a8a' // the selected route reads as "selected" where risk is Low
@@ -57,15 +59,19 @@ interface Props {
   selected: number
   heatmapOn: boolean
   onSelect: (route: number) => void
+  dark: boolean
 }
 
-export default function MapView({ plan, score, mode, selected, heatmapOn, onSelect }: Props) {
+export default function MapView({ plan, score, mode, selected, heatmapOn, onSelect, dark }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
-  const [ready, setReady] = useState(false)
+  // Bumped on every style load: switching light/dark replaces all layers, so every
+  // effect below re-applies its data when this changes.
+  const [ready, setReady] = useState(0)
   const [failed, setFailed] = useState(false)
-  const live = useRef({ plan, score, mode, selected, onSelect, heatmapOn })
-  live.current = { plan, score, mode, selected, onSelect, heatmapOn }
+  const fitted = useRef<Plan | null>(null)
+  const live = useRef({ plan, score, mode, selected, onSelect, heatmapOn, dark })
+  live.current = { plan, score, mode, selected, onSelect, heatmapOn, dark }
 
   const heat = useMemo(() => (plan ? createHeatCanvas(plan.grid) : null), [plan])
   const heatHours = useMemo(() => (score ? decodeHours(score[mode].heatmap) : null), [score, mode])
@@ -77,7 +83,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     try {
       map = new MlMap({
         container: el.current!,
-        style: STYLE,
+        style: dark ? STYLES.dark : STYLES.light,
         bounds: US_BOUNDS,
         fitBoundsOptions: { padding: 20 },
         attributionControl: {
@@ -105,9 +111,10 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     semi.onload = addSemi
     semi.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SEMI_SVG)}`
 
-    map.on('load', () => {
+    map.on('style.load', () => {
       addSemi()
-      const before = map.getLayer(LABEL_LAYER) ? LABEL_LAYER : undefined
+      // Data goes under the first label layer so place names stay readable.
+      const before = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
       map.addSource('routes', { type: 'geojson', data: EMPTY })
       map.addSource('segments', { type: 'geojson', data: EMPTY })
       map.addSource('checkpoints', { type: 'geojson', data: EMPTY })
@@ -119,7 +126,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           type: 'line',
           source: 'routes',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.9 },
+          paint: { 'line-color': live.current.dark ? '#0b0f17' : '#ffffff', 'line-width': 6, 'line-opacity': 0.9 },
         },
         before,
       )
@@ -137,7 +144,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         filter: ['==', ['get', 'route'], -1],
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
-          'line-color': levelColor(SELECTED_LOW),
+          'line-color': levelColor(live.current.dark ? '#60a5fa' : SELECTED_LOW),
           'line-width': ['interpolate', ['linear'], ['zoom'], 3, 4, 8, 6, 12, 8],
         },
       })
@@ -147,7 +154,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         source: 'checkpoints',
         filter: ['==', ['get', 'route'], -1],
         paint: {
-          'circle-color': levelColor(SELECTED_LOW),
+          'circle-color': levelColor(live.current.dark ? '#60a5fa' : SELECTED_LOW),
           'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, 7, 3.5, 10, 6],
           // Zoomed out, the coloured line carries the risk; dots appear as you zoom in.
           'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5.5, 0, 6.5, 1],
@@ -164,7 +171,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         paint: {
           'circle-radius': 6,
           'circle-color': ['case', ['==', ['get', 'kind'], 'rest'], '#111827', '#ffffff'],
-          'circle-stroke-color': '#111827',
+          'circle-stroke-color': ['case', ['==', ['get', 'known'], 1], '#111827', '#b45309'],
           'circle-stroke-width': 2.5,
         },
       })
@@ -181,7 +188,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           'icon-ignore-placement': true,
         },
       })
-      setReady(true)
+      setReady((n) => n + 1)
     })
 
     const popup = new Popup({ closeButton: false, closeOnClick: false, maxWidth: '260px', offset: 10 })
@@ -224,13 +231,17 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       const p = live.current.plan
       if (!f || !p) return
       map.getCanvas().style.cursor = 'pointer'
-      const props = f.properties as { kind: string; mile: number; at: number }
+      const props = f.properties as { kind: string; mile: number; at: number; name: string; spaces: number; known: number }
+      const esc = (x: string) => x.replace(/[<>&"]/g, (ch) => `&#${ch.charCodeAt(0)};`)
       popup
         .setLngLat(e.lngLat)
         .setHTML(
           `<div class="pop"><b>${props.kind === 'rest' ? '10-hour rest' : '30-minute break'}</b>` +
-            `<div>Mile ${Math.round(props.mile).toLocaleString('en-US')}</div>` +
-            `<div>Starts ${clock(props.at, p.timezone)}</div><div class="muted">Required by hours-of-service rules</div></div>`,
+            (props.known
+              ? `<div>${esc(props.name)}${props.spaces > 0 ? ` · ${props.spaces} truck spaces` : ''}</div>`
+              : '<div class="warn-text">No known truck parking here; plan ahead</div>') +
+            `<div>Mile ${Math.round(props.mile).toLocaleString('en-US')} · ${clock(props.at, p.timezone)}</div>` +
+            '<div class="muted">Required by hours-of-service rules</div></div>',
         )
         .addTo(map)
     })
@@ -264,8 +275,16 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       features: (plan?.routes.features ?? []).flatMap((r) =>
         (r.properties.stops ?? []).map((st) => ({
           type: 'Feature' as const,
-          geometry: { type: 'Point' as const, coordinates: [st.lon, st.lat] },
-          properties: { route: r.properties.id, kind: st.kind, mile: st.mile, at: st.at },
+          geometry: { type: 'Point' as const, coordinates: st.place ? [st.place.lon, st.place.lat] : [st.lon, st.lat] },
+          properties: {
+            route: r.properties.id,
+            kind: st.kind,
+            mile: st.mile,
+            at: st.at,
+            name: st.place?.name ?? '',
+            spaces: st.place?.spaces ?? -1,
+            known: st.place ? 1 : 0,
+          },
         })),
       ),
     })
@@ -285,7 +304,8 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         'route-casing',
       )
     }
-    if (plan && plan.routes.features.length) {
+    if (plan && plan.routes.features.length && fitted.current !== plan) {
+      fitted.current = plan
       let w = 180, s = 90, e = -180, n = -90
       for (const f of plan.routes.features)
         for (const [x, y] of f.geometry.coordinates) {
@@ -362,6 +382,13 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     if (!map || !ready) return
     if (map.getLayer('heat')) map.setLayoutProperty('heat', 'visibility', heatmapOn ? 'visible' : 'none')
   }, [heatmapOn, ready, heat])
+
+  // Light/dark: swap the basemap; 'style.load' then rebuilds our layers.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    map.setStyle(dark ? STYLES.dark : STYLES.light)
+  }, [dark])
 
   if (failed) {
     return (

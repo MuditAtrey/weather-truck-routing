@@ -17,6 +17,7 @@ from django.core import signing
 from timezonefinder import TimezoneFinder
 
 from .domain import checkpoints as cp
+from .domain import rest_stops
 from .domain.forecast import HOUR, Series, ceil_hour, floor_hour, sample_at, sample_hour
 from .domain.geo import LatLon, haversine_mi
 from .domain.grid import corridor
@@ -127,7 +128,8 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
     token_cps: list[list[float | int]] = []
     token_routes: list[list[int | bool]] = []
     for rid, route in enumerate(result.routes):
-        cps = cp.build(route, req.interval_mi, req.hos)
+        schedule = rest_stops.plan(route) if req.hos else None
+        cps = cp.build(route, req.interval_mi, schedule)
         trip_s = cps[-1].elapsed_s
         token_routes.append([round(trip_s), "crosses_canada" in route.warnings])
         route_features.append(
@@ -145,17 +147,9 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
                     "source": route.source,
                     "via": bool(route.via),
                     "warnings": sorted(set(route.warnings)),
-                    "stops": [
-                        {
-                            "kind": st.kind,
-                            "lat": round(st.point[0], 5),
-                            "lon": round(st.point[1], 5),
-                            "mile": round(st.mile, 1),
-                            "at": round(dep_epoch + st.elapsed_s),
-                            "duration_s": round(st.duration_s),
-                        }
-                        for st in (cp.rest_stops(route) if req.hos else [])
-                    ],
+                    "stops": [_stop_json(st, schedule, dep_epoch) for st in schedule.stops]
+                    if schedule
+                    else [],
                 },
                 rid + 1,
             )
@@ -226,6 +220,33 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
             {"lat": lat, "lon": lon, "start": s, "end": e}
             for (lat, lon), (s, e) in zip(points.coords, points.ranges, strict=True)
         ],
+    }
+
+
+def _stop_json(st: rest_stops.Stop, schedule: rest_stops.Schedule, dep: int) -> dict[str, Any]:
+    site = st.site
+    return {
+        "kind": st.kind,
+        "lat": round(st.point[0], 5),
+        "lon": round(st.point[1], 5),
+        "mile": round(st.mile, 1),
+        "at": round(dep + schedule.starts_at(st)),
+        "duration_s": round(st.duration_s),
+        "early_min": round(st.early_s / 60),
+        "place": None
+        if site is None
+        else {
+            "name": site.name
+            or site.brand
+            or ("Truck parking" if site.kind != "public" else "Rest area"),
+            "kind": site.kind,
+            "road": site.road,
+            "spaces": site.spaces,
+            "off_route_mi": round(st.off_route_mi, 1),
+            "lat": site.lat,
+            "lon": site.lon,
+            "source": "U.S. DOT NTAD" if site.source == "ntad" else "OpenStreetMap",
+        },
     }
 
 

@@ -1,15 +1,47 @@
-import type { ModeResult, Plan } from '../api/client'
+import { useEffect, useState } from 'react'
+import type { ModeResult, Plan, ScoreOut } from '../api/client'
 import { clock, duration, miles } from '../lib/format'
-import { LEVEL_COLORS, LEVELS, UNKNOWN_COLOR } from '../lib/risk'
+import { LEVEL_COLORS, LEVELS, UNKNOWN_COLOR, type WindMode } from '../lib/risk'
+import { nearestPlace, verdictFor } from '../lib/verdict'
 
 interface Props {
   plan: Plan
+  score: ScoreOut | null
+  mode: WindMode
   result: ModeResult | null
   selected: number
   onSelect: (id: number) => void
 }
 
-export default function RouteCards({ plan, result, selected, onSelect }: Props) {
+function VerdictLine({ plan, score, mode, routeId }: { plan: Plan; score: ScoreOut; mode: WindMode; routeId: number }) {
+  const v = verdictFor(plan, score, mode, routeId)
+  const [near, setNear] = useState('')
+  useEffect(() => {
+    let live = true
+    setNear('')
+    if (v.point) nearestPlace(v.point).then((p) => live && setNear(p))
+    return () => {
+      live = false
+    }
+  }, [v.point?.[0], v.point?.[1]])
+  if (v.level === null) return null
+  const color = v.level > 0 ? LEVEL_COLORS[v.level] : undefined
+  return (
+    <div className={`verdict lvl${v.level}`} style={color ? { borderColor: color } : undefined}>
+      <strong>
+        {v.level > 0 && <span className="verdict-level">{LEVELS[v.level]}:</span>} {v.hazard}
+      </strong>
+      {(near || v.when) && (
+        <span className="verdict-where">
+          {[near, v.when].filter(Boolean).join(' · ')}
+        </span>
+      )}
+      {v.level > 0 && <span className="verdict-action">{v.action}</span>}
+    </div>
+  )
+}
+
+export default function RouteCards({ plan, score, mode, result, selected, onSelect }: Props) {
   const routes = plan.routes.features.map((f) => f.properties)
   const order = result?.ranking.order ?? routes.map((r) => r.id)
   return (
@@ -40,6 +72,7 @@ export default function RouteCards({ plan, result, selected, onSelect }: Props) 
                   <span className="badge warnb" title="Leaves the US through Canada: border crossing and customs">via Canada</span>
                 )}
               </div>
+              {score && <VerdictLine plan={plan} score={score} mode={mode} routeId={id} />}
               <div className="card-stats">
                 <span>{miles(r.distance_mi)}</span>
                 <span title="Driving time">{duration(r.drive_s)} driving</span>
