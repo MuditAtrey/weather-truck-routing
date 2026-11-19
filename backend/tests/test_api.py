@@ -39,6 +39,13 @@ def test_health() -> None:
     assert client.get("/health").json() == {"status": "ok"}
 
 
+def test_api_docs_page_renders() -> None:
+    from django.test import Client
+
+    r = Client().get("/api/docs")
+    assert r.status_code == 200 and b"swagger" in r.content.lower()
+
+
 def test_timezone_lookup() -> None:
     assert client.get("/timezone?lat=39.74&lon=-104.99").json() == {"timezone": "America/Denver"}
 

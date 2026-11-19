@@ -31,3 +31,5 @@ dist/
 
 # Local tool config
 .claude/
+.vercel
+.env*

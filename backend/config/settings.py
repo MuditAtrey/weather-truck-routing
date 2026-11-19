@@ -34,6 +34,9 @@ MIDDLEWARE = [
 ROOT_URLCONF = "config.urls"
 ASGI_APPLICATION = "config.asgi.application"
 
+# Only used to render the interactive API docs page (/api/docs, assets from a CDN).
+TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": []}]
+
 DATABASES: dict[str, dict[str, str]] = {}
 
 CACHES = {
