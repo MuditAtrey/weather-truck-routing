@@ -19,6 +19,7 @@ export interface RouteProps {
   trip_s: number
   source: 'valhalla' | 'osrm'
   via: boolean
+  warnings: string[]
 }
 export interface CheckpointProps {
   route: number

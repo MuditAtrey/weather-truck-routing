@@ -48,7 +48,6 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
   }, [playing, max])
 
   const t = hours[hour] ?? departure
-  const offset = Math.round((t - departure) / 3600)
   return (
     <div className="timeline" role="group" aria-label="Weather heatmap time">
       <button
@@ -69,7 +68,7 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
       <div className="slider">
         <div className="slider-label">
           <strong>{clock(t, timeZone)}</strong>
-          <span className="muted">{offset >= 0 ? `+${offset} h from departure` : `${offset} h`}</span>
+          <span className="muted">hour {hour} of {max} after departure</span>
         </div>
         <input
           type="range"

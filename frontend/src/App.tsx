@@ -22,6 +22,7 @@ type Phase =
 const WARNINGS: Record<string, string> = {
   fewer_than_3_routes: 'Only found fewer than 3 genuinely different routes for this trip.',
   snapped_far: 'A point you picked is over a mile from the nearest road; the route starts at the closest road.',
+  crosses_canada: 'A route crosses into Canada (border crossing and customs). Choose another route for a domestic load.',
   truck_restrictions_relaxed: 'The router relaxed some truck restrictions to find a route. Check bridge heights and weight limits.',
 }
 const FALLBACK: Record<string, string> = {
@@ -175,8 +176,8 @@ export default function App() {
               <RouteCards plan={plan} result={result} selected={selected} onSelect={setSelected} />
               <p className="footnote muted">
                 Risk is rated at each checkpoint, at the truck’s estimated arrival time, and each checkpoint counts for
-                the road halfway to its neighbours. Ranking: fewest No Travel, then Severe, then High miles, then lowest
-                average risk, then shortest time.
+                the road halfway to its neighbours. Ranking: US-only routes first, then fewest No Travel, Severe and High miles,
+                then lowest average risk, then shortest time.
               </p>
             </>
           )}

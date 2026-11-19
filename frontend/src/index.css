@@ -13,7 +13,7 @@ a { color: var(--accent); }
 .app { display: grid; grid-template-columns: 400px 1fr; height: 100%; }
 .panel { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .stage { position: relative; min-height: 0; }
-.map { position: absolute; inset: 0; }
+.stage .map { position: absolute; inset: 0; }
 .map-loading { background: #eef2f6; }
 .map-failed { display: grid; place-items: center; padding: 24px; text-align: center; background: #eef2f6; }
 
@@ -39,8 +39,9 @@ input[aria-invalid='true'] { border-color: var(--bad); }
 .options li { padding: 7px 8px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
 .options li.active { background: var(--info-bg); }
 .options small { color: var(--muted); }
-.seg { display: inline-flex; flex-direction: row; flex-wrap: wrap; gap: 0; align-items: center; }
-.seg legend { width: 100%; margin-bottom: 4px; }
+.seg { display: block; white-space: nowrap; flex: 0 0 auto; }
+.seg legend { margin-bottom: 4px; padding: 0; }
+.seg label, .seg button { display: inline-block; }
 .seg label, .seg button { padding: 6px 10px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; margin-left: -1px; font-size: 13px; }
 .seg label:first-of-type, .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
 .seg label:last-of-type, .seg button:last-child { border-radius: 0 8px 8px 0; }
@@ -82,6 +83,7 @@ button.ghost { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;
 .badge.good { background: #d1fae5; color: var(--good); font-weight: 600; }
 .badge.bad { background: #ffe4e6; color: var(--bad); font-weight: 600; }
 .badge.subtle { color: var(--muted); }
+.badge.warnb { background: #fef3c7; color: #92400e; }
 .card-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .card-eta { font-size: 12px; color: var(--muted); }
 .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--line); }
@@ -117,10 +119,12 @@ button.ghost { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;
 .pop-risk::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--c); margin-right: 5px; }
 
 @media (max-width: 899px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; min-height: 100%; }
-  .stage { grid-row: 1; min-height: 55vh; }
+  .app { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; min-height: 100%; }
+  .stage { grid-row: 1; display: flex; flex-direction: column; }
+  .stage .map { position: relative; inset: auto; height: 52vh; flex: none; }
+  .stage .timeline { position: static; margin: 0; border-radius: 0; box-shadow: none; border-bottom: 1px solid var(--line); }
   .panel { grid-row: 2; border-right: 0; overflow: visible; }
-  .timeline { left: 8px; right: 8px; bottom: 8px; padding: 8px 10px; gap: 8px; }
+  .timeline { padding: 8px 12px; gap: 8px; }
   .toggles { width: 100%; justify-content: space-between; }
   .legend-toggle .legend-chip:nth-child(n + 3) { display: none; }
 }

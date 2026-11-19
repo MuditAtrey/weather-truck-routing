@@ -28,3 +28,6 @@ staticfiles/
 node_modules/
 dist/
 *.log
+
+# Local tool config
+.claude/

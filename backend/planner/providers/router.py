@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from django.conf import settings
 from django.core.cache import cache
 
+from ..domain.borders import crosses_canada
 from ..domain.geo import KM_PER_MI, LatLon, haversine_mi, offset_point, overlap_ratio
 from ..domain.route import Route
 from . import osrm, valhalla
@@ -175,6 +176,8 @@ async def find_routes(origin: LatLon, dest: LatLon, cargo_lb: int) -> RoutingRes
     if len(routes) < TARGET_ROUTES:
         warnings.append("fewer_than_3_routes")
     for r in routes:
+        if crosses_canada(r.coords):
+            r.warnings.append("crosses_canada")
         warnings += r.warnings
 
     result = RoutingResult(routes[:TARGET_ROUTES], provider, reason, sorted(set(warnings)))

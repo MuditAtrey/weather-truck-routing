@@ -36,6 +36,9 @@ export default function RouteCards({ plan, result, selected, onSelect }: Props) 
                 {!recommended && noTravel && <span className="badge bad">No Travel segment</span>}
                 {result && !recommended && !noTravel && <span className="badge">#{rank + 1}</span>}
                 {r.via && <span className="badge subtle" title="Found by routing through a side point">detour</span>}
+                {r.warnings?.includes('crosses_canada') && (
+                  <span className="badge warnb" title="Leaves the US through Canada: border crossing and customs">via Canada</span>
+                )}
               </div>
               <div className="card-stats">
                 <span>{miles(r.distance_mi)}</span>

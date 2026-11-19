@@ -44,6 +44,20 @@ export const PRESETS: Preset[] = [
   },
 ]
 
+const zones = new Map<string, Promise<string>>()
+
+/** Origin time zone, looked up once per place. */
+function zoneFor(p: PlaceOption): Promise<string> {
+  const key = `${p.lat.toFixed(3)},${p.lon.toFixed(3)}`
+  let z = zones.get(key)
+  if (!z) {
+    z = api.timezone(p.lat, p.lon).then((r) => r.timezone)
+    z.catch(() => zones.delete(key))
+    zones.set(key, z)
+  }
+  return z
+}
+
 interface Props {
   busy: boolean
   onSubmit: (req: PlanIn, labels: [string, string]) => void
@@ -64,30 +78,41 @@ export default function TripForm({ busy, onSubmit, onCancel }: Props) {
   // Departure is entered in the origin's local time; look the zone up when it changes.
   useEffect(() => {
     if (!origin) return
-    const c = new AbortController()
-    api
-      .timezone(origin.lat, origin.lon, c.signal)
-      .then(({ timezone }) => {
-        setTz(timezone)
-        if (!departureTouched) setDeparture(localInputValue(timezone, 30))
+    let current = true
+    zoneFor(origin)
+      .then((zone) => {
+        if (!current) return
+        setTz(zone)
+        if (!departureTouched) setDeparture(localInputValue(zone, 30))
       })
       .catch(() => undefined)
-    return () => c.abort()
+    return () => {
+      current = false
+    }
   }, [origin, departureTouched])
 
   const cargoNum = Number(cargo)
   const cargoValid = cargo.trim() !== '' && Number.isInteger(cargoNum) && cargoNum >= 0 && cargoNum <= 80000
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!origin || !destination) return setError('Pick an origin and a destination from the suggestions.')
     if (!cargoValid) return setError('Cargo weight must be a whole number from 0 to 80,000 lb.')
     setError('')
+    // An untouched departure means "leave soon": compute it now, in the origin's zone, so
+    // a slow zone lookup or a page left open for an hour can't send a stale or wrong time.
+    let dep = departure
+    if (!departureTouched) {
+      const zone = await zoneFor(origin).catch(() => tz)
+      dep = localInputValue(zone, 30)
+      setTz(zone)
+      setDeparture(dep)
+    }
     onSubmit(
       {
         origin: { lat: origin.lat, lon: origin.lon, label: origin.label },
         destination: { lat: destination.lat, lon: destination.lon, label: destination.label },
-        departure_local: departure,
+        departure_local: dep,
         cargo_lb: cargoNum,
         interval_mi: interval,
         hos,

@@ -4,9 +4,15 @@ from planner.domain.risk import Level
 from planner.domain.scoring import RouteSummary, point_risk, rank
 
 
-def summary(rid: int, levels: tuple[float, ...], unknown: float = 0.0, trip_h: float = 10):
+def summary(
+    rid: int,
+    levels: tuple[float, ...],
+    unknown: float = 0.0,
+    trip_h: float = 10,
+    leaves_us: bool = False,
+):
     total = sum(levels) + unknown
-    return RouteSummary(rid, tuple(levels), unknown, total, trip_h * 3600)  # type: ignore[arg-type]
+    return RouteSummary(rid, tuple(levels), unknown, total, trip_h * 3600, leaves_us)  # type: ignore[arg-type]
 
 
 def test_fewest_severe_miles_beats_shorter_time() -> None:
@@ -77,3 +83,13 @@ def test_corridor_covers_route_and_respects_budget() -> None:
     assert [c.id for c in cells] == list(range(1, len(cells) + 1))
     long_line = [(30.0 + k * 0.1, -120.0 + k * 0.4) for k in range(120)]
     assert len(corridor([long_line], max_cells=320)) <= 320
+
+
+def test_us_only_route_beats_a_faster_route_through_canada() -> None:
+    canada = summary(0, (273, 0, 0, 0, 0), trip_h=4.7, leaves_us=True)
+    domestic = summary(1, (360, 0, 0, 0, 0), trip_h=5.7)
+    r = rank([canada, domestic])
+    assert r.recommended == 1
+    assert "Border crossing" in r.reasons[0]
+    both = rank([canada, summary(2, (272, 0, 0, 0, 0), trip_h=5.6, leaves_us=True)])
+    assert both.recommended == 0

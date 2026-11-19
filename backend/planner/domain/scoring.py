@@ -18,8 +18,9 @@ from .risk import Conditions, Level, assess
 
 WindMode = Literal["sustained", "gust"]
 
-CRITERIA = ("no_travel_mi", "severe_mi", "high_mi", "avg_risk", "trip_min")
+CRITERIA = ("leaves_us", "no_travel_mi", "severe_mi", "high_mi", "avg_risk", "trip_min")
 CRITERION_TEXT = {
+    "leaves_us": "Border crossing",
     "no_travel_mi": "No Travel miles",
     "severe_mi": "Severe miles",
     "high_mi": "High miles",
@@ -52,6 +53,7 @@ class RouteSummary:
     unknown_mi: float
     total_mi: float
     trip_s: float
+    leaves_us: bool = False
 
     @property
     def known_mi(self) -> float:
@@ -71,12 +73,17 @@ class RouteSummary:
                 return lvl
         return None
 
-    def key(self, unknown_as: Level) -> tuple[float, float, float, float, float]:
-        """Sort key, rounded so float noise never decides a ranking."""
+    def key(self, unknown_as: Level) -> tuple[float, float, float, float, float, float]:
+        """Sort key, rounded so float noise never decides a ranking.
+
+        A domestic load should not be routed through Canada when a US-only route exists,
+        so leaving the country is compared before any weather criterion.
+        """
         miles = list(self.miles_by_level)
         miles[unknown_as] += self.unknown_mi
         avg = sum(i * m for i, m in enumerate(miles)) / self.total_mi if self.total_mi else 0
         return (
+            1.0 if self.leaves_us else 0.0,
             round(miles[Level.NO_TRAVEL], 1),
             round(miles[Level.SEVERE], 1),
             round(miles[Level.HIGH], 1),
@@ -86,7 +93,11 @@ class RouteSummary:
 
 
 def summarize(
-    route_id: int, risks: Sequence[PointRisk], represented_mi: Sequence[float], trip_s: float
+    route_id: int,
+    risks: Sequence[PointRisk],
+    represented_mi: Sequence[float],
+    trip_s: float,
+    leaves_us: bool = False,
 ) -> RouteSummary:
     by_level = [0.0] * 5
     unknown = 0.0
@@ -101,6 +112,7 @@ def summarize(
         unknown_mi=unknown,
         total_mi=sum(represented_mi),
         trip_s=trip_s,
+        leaves_us=leaves_us,
     )
 
 
@@ -113,6 +125,8 @@ class Ranking:
 
 
 def _fmt(criterion: str, value: float) -> str:
+    if criterion == "leaves_us":
+        return "via Canada" if value else "US only"
     if criterion == "avg_risk":
         return f"{value:.2f}"
     if criterion == "trip_min":

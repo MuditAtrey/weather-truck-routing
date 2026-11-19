@@ -148,3 +148,17 @@ def test_outside_forecast_is_unknown_not_calm() -> None:
 
 def test_floor_ceil_hours_are_whole_hours() -> None:
     assert math.isclose(T0 % HOUR, 0)
+
+
+def test_canada_outline() -> None:
+    from planner.domain.borders import crosses_canada, in_canada
+
+    assert in_canada((42.98, -81.25))  # London, Ontario
+    assert in_canada((43.65, -79.38))  # Toronto
+    assert in_canada((49.9, -97.1))  # Winnipeg
+    assert not in_canada((42.33, -83.05))  # Detroit
+    assert not in_canada((42.89, -78.88))  # Buffalo
+    assert not in_canada((41.5, -81.7))  # Cleveland
+    assert not in_canada((47.6, -122.3))  # Seattle
+    assert crosses_canada([(42.33, -83.05), (42.98, -81.25), (42.89, -78.88)], step=1)
+    assert not crosses_canada([(42.33, -83.05), (41.5, -81.7), (42.89, -78.88)], step=1)

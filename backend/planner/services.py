@@ -119,11 +119,11 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
     route_features: list[dict[str, Any]] = []
     cp_features: list[dict[str, Any]] = []
     token_cps: list[list[float | int]] = []
-    token_routes: list[int] = []
+    token_routes: list[list[int | bool]] = []
     for rid, route in enumerate(result.routes):
         cps = cp.build(route, req.interval_mi, req.hos)
         trip_s = cps[-1].elapsed_s
-        token_routes.append(round(trip_s))
+        token_routes.append([round(trip_s), "crosses_canada" in route.warnings])
         route_features.append(
             _feature(
                 {
@@ -138,6 +138,7 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
                     "trip_s": round(trip_s),
                     "source": route.source,
                     "via": bool(route.via),
+                    "warnings": sorted(set(route.warnings)),
                 },
                 rid + 1,
             )
@@ -245,10 +246,16 @@ def score(req: ScoreIn) -> dict[str, Any]:
     for mode in modes:
         risks = [point_risk(s, cargo, mode) for s in samples]
         summaries = []
-        for rid, trip_s in enumerate(tok["routes"]):
+        for rid, (trip_s, leaves_us) in enumerate(tok["routes"]):
             idx = [i for i, c in enumerate(tok["cps"]) if c[0] == rid]
             summaries.append(
-                summarize(rid, [risks[i] for i in idx], [tok["cps"][i][1] for i in idx], trip_s)
+                summarize(
+                    rid,
+                    [risks[i] for i in idx],
+                    [tok["cps"][i][1] for i in idx],
+                    trip_s,
+                    leaves_us,
+                )
             )
         ranking = rank(summaries)
         heatmap = []
