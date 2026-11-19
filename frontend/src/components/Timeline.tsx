@@ -10,6 +10,7 @@ import { clock, num } from '../lib/format'
 import { hourStore, timeAt, usePlayhead } from '../lib/hourStore'
 import { LEVEL_COLORS, LEVELS, UNKNOWN_COLOR, levelAt, type WindMode } from '../lib/risk'
 import { stopSymbol } from '../lib/symbols'
+import { camera } from '../lib/camera'
 import { createTrack } from '../lib/track'
 import { nearestPlace } from '../lib/verdict'
 import Symbol from './Symbol'
@@ -19,8 +20,6 @@ interface Props {
   score: ScoreOut | null
   selected: number
   mode: WindMode
-  /** Called when playback starts or stops (the map follows the truck while playing). */
-  onPlaying: (playing: boolean) => void
 }
 
 const partsCache = new Map<string, Intl.DateTimeFormat>()
@@ -45,11 +44,12 @@ function hourLabel(h: number) {
   return h === 0 ? '12 AM' : h === 12 ? 'Noon' : h < 12 ? `${h} AM` : `${h - 12} PM`
 }
 
-export default function Timeline({ plan, score, selected, mode, onPlaying }: Props) {
+export default function Timeline({ plan, score, selected, mode }: Props) {
   const playhead = usePlayhead()
   const hour = Math.floor(playhead)
   const [playing, setPlaying] = useState(false)
   const raf = useRef(0)
+  const pending = useRef(0) // a play waiting for the camera to frame the trip
   const input = useRef<HTMLInputElement>(null)
   const { hours, departure, timezone: timeZone } = plan
   const max = hours.length - 1
@@ -69,10 +69,6 @@ export default function Timeline({ plan, score, selected, mode, onPlaying }: Pro
   useEffect(() => {
     if (hourStore.get() > viewMax) hourStore.set(viewMax)
   }, [viewMax])
-
-  useEffect(() => {
-    onPlaying(playing)
-  }, [playing])
 
   // Keep the thumb in step with the playhead every frame without re-rendering React.
   useEffect(() => {
@@ -173,6 +169,7 @@ export default function Timeline({ plan, score, selected, mode, onPlaying }: Pro
   const onRoad = truck && truck.status !== 'before' && truck.status !== 'arrived'
 
   const seek = (h: number) => {
+    window.clearTimeout(pending.current)
     setPlaying(false)
     hourStore.set(Math.max(0, Math.min(viewMax, h)))
   }
@@ -184,8 +181,12 @@ export default function Timeline({ plan, score, selected, mode, onPlaying }: Pro
           type="button"
           className="play"
           onClick={() => {
-            if (!playing && hourStore.get() >= viewMax - 0.01) hourStore.set(0)
-            setPlaying((p) => !p)
+            window.clearTimeout(pending.current)
+            if (playing) return setPlaying(false)
+            if (hourStore.get() >= viewMax - 0.01) hourStore.set(0)
+            const wait = camera.beforePlay()
+            if (wait > 0) pending.current = window.setTimeout(() => setPlaying(true), wait)
+            else setPlaying(true)
           }}
           aria-label={playing ? 'Pause' : 'Play the trip'}
         >

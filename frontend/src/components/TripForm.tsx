@@ -156,10 +156,10 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded 
     <form className={`trip${folded ? ' folded' : ''}`} onSubmit={submit} noValidate>
       <PlaceInput label="Origin" value={origin} onChange={setOrigin} placeholder="City, address, or lat, lon" />
       <PlaceInput label="Destination" value={destination} onChange={setDestination} placeholder="City, address, or lat, lon" />
-      <div className="row">
-        <div className="field">
+      <div className="row when">
+        <div className="field dep">
           <label htmlFor="dep">
-            Departure <span className="muted">({zoneAbbrev(tz)}, origin time)</span>
+            Departure <span className="muted">· origin time ({zoneAbbrev(tz)})</span>
           </label>
           <input
             id="dep"

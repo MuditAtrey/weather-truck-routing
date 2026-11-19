@@ -47,6 +47,7 @@ import {
 } from '../lib/risk'
 import { routeSegments } from '../lib/segments'
 import { ALL_SYMBOLS, MAP_SIZES, SYMBOL_LABEL, hazardSymbol, stopSymbol, symbolImage, symbolSvg, type SymbolId } from '../lib/symbols'
+import { camera } from '../lib/camera'
 import { createTrack } from '../lib/track'
 
 setWorkerUrl(workerUrl)
@@ -494,6 +495,37 @@ export default function MapView(props: Props) {
     }
   }, [plan, track, heat, heatHours, ready])
 
+  // Play keeps the camera still; it only frames the whole trip on the first play of a
+  // plan or when the truck or the route is off screen.
+  const playedPlan = useRef<Plan | null>(null)
+  useEffect(() => {
+    camera.beforePlay = () => {
+      const map = mapRef.current
+      const { plan: p, selected: sel, bottomInset: inset } = live.current
+      if (!map || !p) return 0
+      const tr = createTrack(p, sel)
+      const { width, height } = map.getContainer().getBoundingClientRect()
+      const onScreen = (c: [number, number] | number[]) => {
+        const q = map.project(c as [number, number])
+        return q.x >= 0 && q.x <= width && q.y >= 0 && q.y <= height - inset
+      }
+      const truckPos = tr?.at(timeAt(p.hours, hourStore.get())).pos
+      const coords = p.routes.features[sel]?.geometry.coordinates ?? []
+      const step = Math.max(1, Math.floor(coords.length / 200))
+      let routeVisible = false
+      for (let i = 0; i < coords.length && !routeVisible; i += step) routeVisible = onScreen(coords[i]!)
+      const first = playedPlan.current !== p
+      playedPlan.current = p
+      if (!first && routeVisible && truckPos && onScreen(truckPos)) return 0
+      live.current.onFollow(false)
+      fitRoutes(map, p)
+      return 650
+    }
+    return () => {
+      camera.beforePlay = () => 0
+    }
+  }, [])
+
   // Turning Follow on flies to the truck first, then keeps it centred.
   useEffect(() => {
     const map = mapRef.current
@@ -601,6 +633,14 @@ function fitRoutes(map: MlMap, plan: Plan) {
     for (const [x, y] of f.geometry.coordinates) {
       w = Math.min(w, x!); e = Math.max(e, x!); s = Math.min(s, y!); n = Math.max(n, y!)
     }
-  const wide = window.innerWidth >= 900
-  map.fitBounds([[w, s], [e, n]], { padding: wide ? { top: 80, bottom: 190, left: 60, right: 150 } : 30, duration: 600 })
+  const W = window.innerWidth, H = window.innerHeight
+  // Clear the overlays: key on top, timeline at the bottom, buttons on the right. On a
+  // phone the sheet is already map padding, so only a small margin is added.
+  const padding =
+    W >= 900
+      ? { top: 80, bottom: 190, left: 60, right: 150 }
+      : W >= 600 && H <= 500
+        ? { top: 56, bottom: 120, left: 20, right: 64 }
+        : { top: 64, bottom: 24, left: 24, right: 64 }
+  map.fitBounds([[w, s], [e, n]], { padding, duration: 600 })
 }

@@ -57,7 +57,8 @@ export default function App() {
   const [heatmapOn, setHeatmapOn] = useState(true)
   const [checkpointsOn, setCheckpointsOn] = useState(true)
   const [follow, setFollow] = useState(false)
-  const isPhone = useMedia('(max-width: 899px)')
+  // Same query as the phone CSS: narrow, or narrow-ish and portrait-tall.
+  const isPhone = useMedia('(max-width: 599px), (max-width: 899px) and (min-height: 501px)')
   const [detent, setDetent] = useState<Detent>('half')
   const [sheetH, setSheetH] = useState(0)
   const [serverWeather, setServerWeather] = useState(false)
@@ -204,9 +205,6 @@ export default function App() {
       score={score}
       selected={selected}
       mode={mode}
-      onPlaying={(on) => {
-        if (on) setFollow(true)
-      }}
     />
   ) : null
   const panelBody = (
