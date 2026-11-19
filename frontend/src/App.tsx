@@ -348,9 +348,12 @@ export default function App() {
       <header className="brand">
         <svg viewBox="0 0 32 32" aria-hidden className="logo">
           <rect width="32" height="32" rx="8" />
-          <path d="M7 21h14v-8h4l3 4v4h-2" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
-          <circle cx="11" cy="22" r="2" fill="#fff" />
-          <circle cx="23" cy="22" r="2" fill="#fff" />
+          {/* The truck spans x 7-28 and y 13-24; shift it onto the box's centre. */}
+          <g transform="translate(-1.5 -2.5)">
+            <path d="M7 21h14v-8h4l3 4v4h-2" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
+            <circle cx="11" cy="22" r="2" fill="#fff" />
+            <circle cx="23" cy="22" r="2" fill="#fff" />
+          </g>
         </svg>
         <h1>Weather-aware truck routing</h1>
         <button
