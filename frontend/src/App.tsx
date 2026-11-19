@@ -150,7 +150,7 @@ export default function App() {
           {phase.kind === 'heatmap' && (
             <p className="notice info">
               Routes are scored. The heatmap needs more forecasts than the weather service allows per minute,
-              so it fills in{phase.waitingS ? ` in about ${phase.waitingS} s` : ' shortly'}.
+              so it will appear {phase.waitingS ? `in about ${phase.waitingS} s` : 'shortly'}.
             </p>
           )}
           {phase.kind === 'scoring' && <Progress text="Scoring routes…" />}

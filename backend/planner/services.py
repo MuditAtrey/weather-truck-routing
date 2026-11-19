@@ -30,6 +30,9 @@ HEATMAP_HOURS = 48
 MAX_DEPARTURE_AHEAD = timedelta(hours=72)
 DEPARTURE_GRACE = timedelta(minutes=30)
 MIN_TRIP_MI = 1.0
+WEATHER_REQUEST_MAX = 1000  # Open-Meteo locations per request
+MAX_CELLS = 320
+MIN_CELLS = 120
 POINT_ROUND = 1  # decimals: checkpoints closer than ~5 km share one forecast request
 
 
@@ -165,7 +168,10 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
 
     checkpoint_points = len(points.ranges)  # these come first, so routes can be scored early
     hours = [floor_hour(dep_epoch) + k * HOUR for k in range(HEATMAP_HOURS + 1)]
-    cells = corridor([r.coords for r in result.routes])
+    # Keep checkpoints + cells within one weather request (1,000 locations) when possible,
+    # so the heatmap arrives with the route scores instead of a minute later.
+    cell_budget = max(MIN_CELLS, min(MAX_CELLS, WEATHER_REQUEST_MAX - checkpoint_points))
+    cells = corridor([r.coords for r in result.routes], max_cells=cell_budget)
     cell_points = [points.add(c.center, hours[0], hours[-1], rounding=3) for c in cells]
     grid_features = [
         _feature({"type": "Polygon", "coordinates": [c.ring]}, {"cell": i}, c.id)
