@@ -6,7 +6,7 @@ import Timeline from './components/Timeline'
 import TripForm from './components/TripForm'
 import { hourStore } from './lib/hourStore'
 import type { WindMode } from './lib/risk'
-import { fetchForecasts } from './lib/weather'
+import { BrowserWeatherUnavailable, fetchForecasts, missing } from './lib/weather'
 
 // MapLibre is the heaviest dependency; load it in parallel with the form.
 const MapView = lazy(() => import('./components/MapView'))
@@ -16,6 +16,8 @@ type Phase =
   | { kind: 'routing' }
   | { kind: 'weather'; total: number }
   | { kind: 'heatmap'; waitingS: number } // routes are scored; heatmap cells still loading
+  | { kind: 'waiting'; seconds: number } // the weather service asked us to wait
+  | { kind: 'server-weather'; reason: string } // the browser could not download forecasts
   | { kind: 'scoring' }
   | { kind: 'done' }
   | { kind: 'error'; message: string; stage: 'route' | 'weather' }
@@ -48,6 +50,7 @@ export default function App() {
   const [selected, setSelected] = useState(0)
   const [mode, setMode] = useState<WindMode>('sustained')
   const [heatmapOn, setHeatmapOn] = useState(true)
+  const [serverWeather, setServerWeather] = useState(false)
   const ctrl = useRef<AbortController | null>(null)
   const lastRequest = useRef<PlanIn | null>(null)
 
@@ -58,25 +61,43 @@ export default function App() {
 
   const runWeather = useCallback(async (p: Plan, signal: AbortSignal) => {
     setPhase({ kind: 'weather', total: p.weather_points.length })
+    setServerWeather(false)
     let first = true
+    const show = (s: ScoreOut) => {
+      setScore(s)
+      if (first) {
+        first = false
+        setSelected(s[mode].ranking.recommended ?? s[mode].ranking.order[0] ?? 0)
+      }
+    }
     try {
       await fetchForecasts(
         p.weather_points,
         p.checkpoint_points,
         async (weather, done) => {
-          const s = await api.score(p.token, weather, signal)
-          setScore(s)
-          if (first) {
-            first = false
-            setSelected(s[mode].ranking.recommended ?? s[mode].ranking.order[0] ?? 0)
-          }
+          show(await api.score(p.token, weather, signal))
           setPhase(done >= p.weather_points.length ? { kind: 'done' } : { kind: 'heatmap', waitingS: 0 })
         },
-        (waitingS) => setPhase({ kind: 'heatmap', waitingS }),
+        (seconds) => setPhase(first ? { kind: 'waiting', seconds } : { kind: 'heatmap', waitingS: seconds }),
         signal,
       )
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
+      if (e instanceof BrowserWeatherUnavailable) {
+        // Fall back to downloading the forecasts from the server's own address.
+        setPhase({ kind: 'server-weather', reason: e.message })
+        try {
+          const s = await api.score(p.token, p.weather_points.map(missing), signal, true)
+          if (!s.server_weather_ok) throw new Error(`${e.message} The server could not get forecasts either; try again later.`)
+          show(s)
+          setServerWeather(true)
+          setPhase({ kind: 'done' })
+        } catch (e2) {
+          if ((e2 as Error).name === 'AbortError') return
+          setPhase({ kind: 'error', stage: 'weather', message: (e2 as Error).message })
+        }
+        return
+      }
       setPhase({ kind: 'error', stage: 'weather', message: (e as Error).message })
     }
   }, [mode])
@@ -147,6 +168,10 @@ export default function App() {
             <Progress text={longHaul ? 'Long trip: truck-routing each corridor in legs (about 15–30 s)…' : 'Finding three routes…'} />
           )}
           {phase.kind === 'weather' && <Progress text={`Fetching forecasts for ${phase.total} locations…`} />}
+          {phase.kind === 'waiting' && <Countdown seconds={phase.seconds} />}
+          {phase.kind === 'server-weather' && (
+            <Progress text={`${phase.reason} Fetching the forecasts from the server instead…`} />
+          )}
           {phase.kind === 'heatmap' && (
             <p className="notice info">
               Routes are scored. The heatmap needs more forecasts than the weather service allows per minute,
@@ -183,6 +208,11 @@ export default function App() {
                 </p>
               ))}
               {status && status !== 'ok' && <p className="notice warn">{STATUS[status]}</p>}
+              {serverWeather && (
+                <p className="notice info">
+                  This network’s weather quota is used up, so the server downloaded the forecasts instead.
+                </p>
+              )}
               <RouteCards plan={plan} result={result} selected={selected} onSelect={setSelected} />
               <p className="footnote muted">
                 Risk is rated at each checkpoint, at the truck’s estimated arrival time, and each checkpoint counts for
@@ -238,6 +268,21 @@ function straightKm(r: PlanIn): number {
   const h = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 +
     Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lon - a.lon) * rad) / 2) ** 2
   return 2 * 6371 * Math.asin(Math.sqrt(h))
+}
+
+function Countdown({ seconds }: { seconds: number }) {
+  const [left, setLeft] = useState(seconds)
+  useEffect(() => {
+    setLeft(seconds)
+    const t = window.setInterval(() => setLeft((s) => Math.max(0, s - 1)), 1000)
+    return () => window.clearInterval(t)
+  }, [seconds])
+  return (
+    <Progress
+      text={`The weather service limits requests per minute (a long trip was just planned from this network). Continuing in ${left} s…`}
+      value={1 - left / Math.max(1, seconds)}
+    />
+  )
 }
 
 function Progress({ text, value }: { text: string; value?: number }) {

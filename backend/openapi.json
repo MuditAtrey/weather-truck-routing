@@ -613,6 +613,15 @@
       },
       "ScoreOut": {
         "properties": {
+          "server_filled": {
+            "description": "Points the server downloaded itself",
+            "title": "Server Filled",
+            "type": "integer"
+          },
+          "server_weather_ok": {
+            "title": "Server Weather Ok",
+            "type": "boolean"
+          },
           "conditions": {
             "items": {
               "$ref": "#/components/schemas/CheckpointWeather"
@@ -628,6 +637,8 @@
           }
         },
         "required": [
+          "server_filled",
+          "server_weather_ok",
           "conditions",
           "sustained",
           "gust"
@@ -726,7 +737,7 @@
       "ScoreIn": {
         "properties": {
           "token": {
-            "maxLength": 200000,
+            "maxLength": 300000,
             "title": "Token",
             "type": "string"
           },
@@ -737,6 +748,12 @@
             "maxItems": 2000,
             "title": "Weather",
             "type": "array"
+          },
+          "fetch_missing": {
+            "default": false,
+            "description": "Download, from the server, points the browser sent with no data at all",
+            "title": "Fetch Missing",
+            "type": "boolean"
           }
         },
         "required": [

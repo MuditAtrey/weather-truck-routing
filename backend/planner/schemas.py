@@ -67,8 +67,12 @@ class PointWeather(Schema):
 
 
 class ScoreIn(Schema):
-    token: str = Field(max_length=200_000)
+    token: str = Field(max_length=300_000)
     weather: list[PointWeather] = Field(max_length=2_000)
+    fetch_missing: bool = Field(
+        default=False,
+        description="Download, from the server, points the browser sent with no data at all",
+    )
 
 
 class RouteScore(Schema):
@@ -104,6 +108,8 @@ class CheckpointWeather(Schema):
 
 
 class ScoreOut(Schema):
+    server_filled: int = Field(description="Points the server downloaded itself")
+    server_weather_ok: bool
     conditions: list[CheckpointWeather]
     sustained: ModeResult
     gust: ModeResult

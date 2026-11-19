@@ -21,12 +21,14 @@ from .domain.forecast import HOUR, Series, ceil_hour, floor_hour, sample_at, sam
 from .domain.geo import LatLon, haversine_mi
 from .domain.grid import corridor
 from .domain.scoring import WindMode, point_index, point_risk, rank, summarize
+from .providers import openmeteo
 from .providers.router import find_routes
-from .schemas import PlanIn, ScoreIn
+from .schemas import PlanIn, PointWeather, ScoreIn
 
 TOKEN_SALT = "plan.v1"  # noqa: S105 (a namespace, not a secret)
 TOKEN_MAX_AGE_S = 2 * 3600
-HEATMAP_HOURS = 48
+HEATMAP_HOURS = 48  # the brief's window; the slider extends to cover longer trips
+MAX_HEATMAP_HOURS = 120
 MAX_DEPARTURE_AHEAD = timedelta(hours=72)
 DEPARTURE_GRACE = timedelta(minutes=30)
 MIN_TRIP_MI = 1.0
@@ -167,7 +169,9 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
             )
 
     checkpoint_points = len(points.ranges)  # these come first, so routes can be scored early
-    hours = [floor_hour(dep_epoch) + k * HOUR for k in range(HEATMAP_HOURS + 1)]
+    longest_trip_h = max(trip for trip, _ in token_routes) / HOUR if token_routes else 0
+    n_hours = min(MAX_HEATMAP_HOURS, max(HEATMAP_HOURS, int(longest_trip_h) + 2))
+    hours = [floor_hour(dep_epoch) + k * HOUR for k in range(n_hours + 1)]
     # Keep checkpoints + cells within one weather request (1,000 locations) when possible,
     # so the heatmap arrives with the route scores instead of a minute later.
     cell_budget = max(MIN_CELLS, min(MAX_CELLS, WEATHER_REQUEST_MAX - checkpoint_points))
@@ -186,6 +190,7 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
             "cells": cell_points,
             "hours": [hours[0], len(hours)],
             "wp": points.ranges,
+            "pts": [[round(lat, 3), round(lon, 3)] for lat, lon in points.coords],
         },
         salt=TOKEN_SALT,
         compress=True,
@@ -217,7 +222,31 @@ def _level_char(level: int | None) -> str:
     return "u" if level is None else str(level)
 
 
-def score(req: ScoreIn) -> dict[str, Any]:
+def _is_empty(pw: Any) -> bool:
+    return all(v is None for arr in (pw.wind, pw.gust, pw.rain, pw.showers, pw.snow) for v in arr)
+
+
+async def _fill_missing(req: ScoreIn, tok: dict[str, Any]) -> tuple[int, bool]:
+    """Fetch, from this server, every point the browser could not download.
+
+    Returns how many points were filled and whether the fetch succeeded.
+    """
+    missing = [i for i, pw in enumerate(req.weather) if _is_empty(pw)]
+    if not missing:
+        return 0, True
+    ranges = tok["wp"]
+    pts = [tuple(tok["pts"][i]) for i in missing]
+    try:
+        series = await openmeteo.fetch(pts, max(ranges[i][1] for i in missing))
+    except openmeteo.WeatherUnavailable:
+        return 0, False
+    for i, h in zip(missing, series, strict=True):
+        filled = openmeteo.window(h, ranges[i][0], ranges[i][1])
+        req.weather[i] = PointWeather(**filled)
+    return len(missing), True
+
+
+async def score(req: ScoreIn) -> dict[str, Any]:
     try:
         tok = signing.loads(req.token, salt=TOKEN_SALT, max_age=TOKEN_MAX_AGE_S)
     except signing.SignatureExpired as exc:
@@ -228,6 +257,9 @@ def score(req: ScoreIn) -> dict[str, Any]:
     ranges: list[list[int]] = tok["wp"]
     if len(req.weather) != len(ranges):
         raise PlanError("weather_mismatch", "Weather must have one entry per weather point")
+    filled, server_ok = 0, True
+    if req.fetch_missing:
+        filled, server_ok = await _fill_missing(req, tok)
     series: list[Series] = []
     for pw, (start, end) in zip(req.weather, ranges, strict=True):
         n = (end - start) // HOUR + 1
@@ -247,10 +279,12 @@ def score(req: ScoreIn) -> dict[str, Any]:
     cell_series = [series[wp] for wp in tok["cells"]]
 
     out: dict[str, Any] = {
+        "server_filled": filled,
+        "server_weather_ok": server_ok,
         "conditions": [
             {"wind": s.wind_mph, "gust": s.gust_mph, "rain": s.rain_in_hr, "snow": s.snow_in_hr}
             for s in samples
-        ]
+        ],
     }
     modes: tuple[WindMode, ...] = ("sustained", "gust")
     for mode in modes:

@@ -52,5 +52,5 @@ async def plan(request: HttpRequest, payload: PlanIn) -> dict[str, object]:
 
 
 @api.post("/score", response={200: ScoreOut, 422: ErrorOut})
-def score(request: HttpRequest, payload: ScoreIn) -> dict[str, object]:
-    return services.score(payload)
+async def score(request: HttpRequest, payload: ScoreIn) -> dict[str, object]:
+    return await services.score(payload)

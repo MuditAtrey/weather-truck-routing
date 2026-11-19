@@ -273,6 +273,13 @@ export interface components {
         };
         /** ScoreOut */
         ScoreOut: {
+            /**
+             * Server Filled
+             * @description Points the server downloaded itself
+             */
+            server_filled: number;
+            /** Server Weather Ok */
+            server_weather_ok: boolean;
             /** Conditions */
             conditions: components["schemas"]["CheckpointWeather"][];
             sustained: components["schemas"]["ModeResult"];
@@ -297,6 +304,12 @@ export interface components {
             token: string;
             /** Weather */
             weather: components["schemas"]["PointWeather"][];
+            /**
+             * Fetch Missing
+             * @description Download, from the server, points the browser sent with no data at all
+             * @default false
+             */
+            fetch_missing: boolean;
         };
     };
     responses: never;

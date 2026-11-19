@@ -20,6 +20,8 @@ type Hourly = { time: number[] } & Record<(typeof VARS)[number], (number | null)
 type Location = { hourly: Hourly }
 
 export class WeatherError extends Error {}
+/** The browser cannot download forecasts (quota used up, blocked, offline). */
+export class BrowserWeatherUnavailable extends WeatherError {}
 
 // Forecasts already downloaded in this tab, by location. Re-planning the same trip (a
 // different weight, interval or departure) reuses them instead of spending quota again.
@@ -43,7 +45,12 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     })
   })
 
-async function request(chunk: WeatherPoint[], forecastHours: number, signal?: AbortSignal) {
+async function request(
+  chunk: WeatherPoint[],
+  forecastHours: number,
+  onWait: (seconds: number) => void,
+  signal?: AbortSignal,
+) {
   const body = new URLSearchParams({
     latitude: chunk.map((p) => p.lat).join(','),
     longitude: chunk.map((p) => p.lon).join(','),
@@ -54,7 +61,13 @@ async function request(chunk: WeatherPoint[], forecastHours: number, signal?: Ab
     forecast_hours: String(forecastHours),
   })
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(URL, { method: 'POST', body, signal })
+    let res: Response
+    try {
+      res = await fetch(URL, { method: 'POST', body, signal })
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') throw e
+      throw new BrowserWeatherUnavailable('Could not reach the weather service from this browser.')
+    }
     if (res.ok) {
       const data = (await res.json()) as Location | Location[]
       return Array.isArray(data) ? data : [data]
@@ -62,15 +75,14 @@ async function request(chunk: WeatherPoint[], forecastHours: number, signal?: Ab
     const reason: string = (await res.json().catch(() => null))?.reason ?? `HTTP ${res.status}`
     const retryAfter = Number(res.headers.get('Retry-After') ?? 30)
     if (res.status === 429 && attempt < 2 && !/daily|hourly/i.test(reason)) {
-      await sleep(Math.min(65, Math.max(5, retryAfter)) * 1000, signal)
+      // Per-minute limit: wait it out, visibly.
+      const wait = Math.min(65, Math.max(5, retryAfter))
+      onWait(wait)
+      await sleep(wait * 1000, signal)
       continue
     }
     if (res.status === 429) {
-      const when = /daily/i.test(reason) ? 'tomorrow' : `in about ${Math.max(1, Math.ceil(retryAfter / 60))} min`
-      throw new WeatherError(
-        `The free weather service's limit for your network has been reached (${/daily/i.test(reason) ? 'daily' : 'hourly'}). ` +
-          `Try again ${when}, or use a 25 or 50 mi interval, which needs fewer forecasts.`,
-      )
+      throw new BrowserWeatherUnavailable(`This network's ${/daily/i.test(reason) ? 'daily' : 'hourly'} weather quota is used up.`)
     }
     throw new WeatherError(`Weather service error: ${reason}`)
   }
@@ -150,7 +162,7 @@ export async function fetchForecasts(
       spent = 0
     }
     if (spent === 0) windowStart = performance.now()
-    const locations = await request(chunk, forecastHours, signal)
+    const locations = await request(chunk, forecastHours, onWait, signal)
     if (locations.length !== chunk.length) throw new WeatherError('Weather service returned the wrong number of locations')
     chunk.forEach((p, i) => {
       const hourly = locations[i]!.hourly

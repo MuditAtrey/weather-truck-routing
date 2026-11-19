@@ -122,7 +122,7 @@ async def test_plan_then_score_round_trip() -> None:
                 "snow": [0.0] * n,
             }
         )
-    s = client.post("/score", json={"token": plan["token"], "weather": weather})
+    s = await aclient.post("/score", json={"token": plan["token"], "weather": weather})
     assert s.status_code == 200, s.json()
     out = s.json()
     n_cp = len(plan["checkpoints"]["features"])
@@ -140,24 +140,32 @@ async def test_plan_then_score_round_trip() -> None:
     # Missing forecasts are unknown, never calm.
     for w in weather:
         w["wind"] = [None] * len(w["wind"])
-    s2 = client.post("/score", json={"token": plan["token"], "weather": weather}).json()
+    s2 = (await aclient.post("/score", json={"token": plan["token"], "weather": weather})).json()
     assert set(s2["sustained"]["checkpoint_levels"]) == {"u"}
     assert s2["sustained"]["ranking"]["status"] == "no_weather"
 
 
-def test_score_rejects_tampered_token_and_bad_shapes() -> None:
-    r = client.post("/score", json={"token": "abc", "weather": []})
+async def test_score_rejects_tampered_token_and_bad_shapes() -> None:
+    r = await aclient.post("/score", json={"token": "abc", "weather": []})
     assert r.status_code == 422 and r.json()["code"] == "bad_token"
     token = services.signing.dumps(
-        {"cargo": 0, "routes": [], "cps": [], "cells": [], "hours": [0, 1], "wp": [[0, 3600]]},
+        {
+            "cargo": 0,
+            "routes": [],
+            "cps": [],
+            "cells": [],
+            "hours": [0, 1],
+            "wp": [[0, 3600]],
+            "pts": [[40.0, -100.0]],
+        },
         salt=services.TOKEN_SALT,
         compress=True,
     )
     short = {"wind": [1.0], "gust": [1.0], "rain": [0.0], "showers": [0.0], "snow": [0.0]}
-    r = client.post("/score", json={"token": token, "weather": [short]})
+    r = await aclient.post("/score", json={"token": token, "weather": [short]})
     assert r.json()["code"] == "weather_mismatch"
     wild = {k: [999.0, 999.0] for k in short}
-    r = client.post("/score", json={"token": token, "weather": [wild]})
+    r = await aclient.post("/score", json={"token": token, "weather": [wild]})
     assert r.json()["code"] == "weather_out_of_range"
 
 
@@ -173,3 +181,60 @@ async def test_upstream_failure_is_a_clean_502() -> None:
         "code": "unavailable",
         "detail": "The routing services are not responding. Try again in a minute.",
     }
+
+
+@respx.mock
+async def test_server_fills_points_the_browser_could_not_download() -> None:
+    respx.post(V_URL).mock(return_value=httpx.Response(200, json=load("valhalla_dal_den.json")))
+    plan = (await aclient.post("/plan", json=body())).json()
+    wps = plan["weather_points"]
+
+    def open_meteo(request: httpx.Request) -> httpx.Response:
+        n = len(request.content.decode().split("latitude=")[1].split("&")[0].split("%2C"))
+        start = min(w["start"] for w in wps)
+        hours = 400
+        hourly = {"time": [start + 3600 * k for k in range(hours)]}
+        for v in ("wind_speed_10m", "wind_gusts_10m", "rain", "showers", "snowfall"):
+            hourly[v] = [50.0 if v == "wind_speed_10m" else 0.0] * hours
+        return httpx.Response(200, json=[{"hourly": hourly}] * n)
+
+    om = respx.post("https://api.open-meteo.com/v1/forecast").mock(side_effect=open_meteo)
+    empty = []
+    for wp in wps:
+        n = (wp["end"] - wp["start"]) // 3600 + 1
+        empty.append({k: [None] * n for k in ("wind", "gust", "rain", "showers", "snow")})
+    r = await aclient.post(
+        "/score", json={"token": plan["token"], "weather": empty, "fetch_missing": True}
+    )
+    out = r.json()
+    assert om.called and out["server_filled"] == len(wps) and out["server_weather_ok"]
+    assert set(out["sustained"]["checkpoint_levels"]) == {"3"}  # 50 mph sustained: Severe
+
+
+@respx.mock
+async def test_server_fallback_failure_is_reported_not_hidden() -> None:
+    respx.post(V_URL).mock(return_value=httpx.Response(200, json=load("valhalla_dal_den.json")))
+    plan = (await aclient.post("/plan", json=body())).json()
+    respx.post("https://api.open-meteo.com/v1/forecast").mock(return_value=httpx.Response(429))
+    empty = [
+        {
+            k: [None] * ((wp["end"] - wp["start"]) // 3600 + 1)
+            for k in ("wind", "gust", "rain", "showers", "snow")
+        }
+        for wp in plan["weather_points"]
+    ]
+    out = (
+        await aclient.post(
+            "/score", json={"token": plan["token"], "weather": empty, "fetch_missing": True}
+        )
+    ).json()
+    assert out["server_weather_ok"] is False
+    assert out["sustained"]["ranking"]["status"] == "no_weather"
+
+
+@respx.mock
+async def test_heatmap_hours_cover_the_whole_trip() -> None:
+    respx.post(V_URL).mock(return_value=httpx.Response(200, json=load("valhalla_dal_den.json")))
+    plan = (await aclient.post("/plan", json=body())).json()
+    longest = max(f["properties"]["trip_s"] for f in plan["routes"]["features"])
+    assert len(plan["hours"]) - 1 >= max(48, longest / 3600)

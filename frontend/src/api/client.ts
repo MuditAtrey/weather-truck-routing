@@ -75,6 +75,10 @@ export const api = {
     call<{ timezone: string }>(`/timezone?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`, { signal }),
   plan: (body: PlanIn, signal?: AbortSignal) =>
     call<Plan>('/plan', { method: 'POST', body: JSON.stringify(body), signal }),
-  score: (token: string, weather: PointWeather[], signal?: AbortSignal) =>
-    call<ScoreOut>('/score', { method: 'POST', body: JSON.stringify({ token, weather }), signal }),
+  score: (token: string, weather: PointWeather[], signal?: AbortSignal, fetchMissing = false) =>
+    call<ScoreOut>('/score', {
+      method: 'POST',
+      body: JSON.stringify({ token, weather, fetch_missing: fetchMissing }),
+      signal,
+    }),
 }
