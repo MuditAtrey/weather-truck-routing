@@ -341,7 +341,13 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     map.setPaintProperty('route-line', 'line-opacity', 0)
     map.setPaintProperty('route-casing', 'line-width', ['case', ['==', ['get', 'id'], selected], 10, 5] as never)
     map.setPaintProperty('route-risk', 'line-color', ['case', routeSel, levelColor(lowSel), levelColor(lowOther)] as never)
-    map.setPaintProperty('route-risk', 'line-width', ['case', routeSel, ['interpolate', ['linear'], ['zoom'], 3, 4.5, 8, 6.5, 12, 8], ['interpolate', ['linear'], ['zoom'], 3, 2.5, 8, 3.5, 12, 4]] as never)
+    // Zoom must be the outermost expression, so the selection test goes inside each stop.
+    map.setPaintProperty('route-risk', 'line-width', [
+      'interpolate', ['linear'], ['zoom'],
+      3, ['case', routeSel, 4.5, 2.5],
+      8, ['case', routeSel, 6.5, 3.5],
+      12, ['case', routeSel, 8, 4],
+    ] as never)
     map.setPaintProperty('route-risk', 'line-opacity', ['case', routeSel, 1, 0.75] as never)
     map.setLayoutProperty('route-risk', 'line-sort-key', ['case', routeSel, 1, 0] as never)
     map.setPaintProperty('cp', 'circle-opacity', ['case', routeSel, 1, 0.55] as never)
