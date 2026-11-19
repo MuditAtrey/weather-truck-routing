@@ -238,3 +238,40 @@ async def test_heatmap_hours_cover_the_whole_trip() -> None:
     plan = (await aclient.post("/plan", json=body())).json()
     longest = max(f["properties"]["trip_s"] for f in plan["routes"]["features"])
     assert len(plan["hours"]) - 1 >= max(48, longest / 3600)
+
+
+@respx.mock
+async def test_server_fallback_waits_out_a_per_minute_limit(monkeypatch) -> None:
+    from planner.providers import openmeteo
+
+    monkeypatch.setattr(openmeteo, "MAX_WAIT_S", 0.01)
+    respx.post(V_URL).mock(return_value=httpx.Response(200, json=load("valhalla_dal_den.json")))
+    plan = (await aclient.post("/plan", json=body())).json()
+    start = min(w["start"] for w in plan["weather_points"])
+    hourly = {"time": [start + 3600 * k for k in range(400)]}
+    for v in ("wind_speed_10m", "wind_gusts_10m", "rain", "showers", "snowfall"):
+        hourly[v] = [5.0] * 400
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        n = len(request.content.decode().split("latitude=")[1].split("&")[0].split("%2C"))
+        return httpx.Response(200, json=[{"hourly": hourly}] * n)
+
+    om = respx.post("https://api.open-meteo.com/v1/forecast").mock(
+        side_effect=[
+            httpx.Response(429, json={"reason": "Minutely API request limit exceeded"}),
+            reply,
+        ]
+    )
+    empty = [
+        {
+            k: [None] * ((w["end"] - w["start"]) // 3600 + 1)
+            for k in ("wind", "gust", "rain", "showers", "snow")
+        }
+        for w in plan["weather_points"]
+    ]
+    out = (
+        await aclient.post(
+            "/score", json={"token": plan["token"], "weather": empty, "fetch_missing": True}
+        )
+    ).json()
+    assert om.call_count == 2 and out["server_weather_ok"] is True

@@ -5,6 +5,7 @@ used up (a busy office network, or someone re-planning a coast-to-coast trip man
 Django fetches the missing points from its own address instead.
 """
 
+import asyncio
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -18,6 +19,14 @@ from .http import client
 URL = "https://api.open-meteo.com/v1/forecast"
 MAX_PER_REQUEST = 1000
 VARS = ("wind_speed_10m", "wind_gusts_10m", "rain", "showers", "snowfall")
+MAX_WAIT_S = 25.0  # stays well inside the 60 s function limit
+
+
+async def _post(data: dict[str, str]) -> httpx.Response:
+    try:
+        return await client().post(URL, data=data, timeout=20.0)
+    except httpx.HTTPError as exc:
+        raise WeatherUnavailable(type(exc).__name__) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +55,12 @@ async def fetch(points: Sequence[LatLon], last_hour: int) -> list[Hourly]:
             "timeformat": "unixtime",
             "forecast_hours": str(hours),
         }
-        try:
-            resp = await client().post(URL, data=data, timeout=20.0)
-        except httpx.HTTPError as exc:
-            raise WeatherUnavailable(type(exc).__name__) from exc
+        resp = await _post(data)
+        if resp.status_code == 429 and "minutely" in resp.text.lower():
+            # Per-minute limit (shared by everyone on this server's address): wait once.
+            wait = min(MAX_WAIT_S, float(resp.headers.get("Retry-After", 20)))
+            await asyncio.sleep(wait)
+            resp = await _post(data)
         if resp.status_code != 200:
             raise WeatherUnavailable(f"HTTP {resp.status_code}")
         body = resp.json()
