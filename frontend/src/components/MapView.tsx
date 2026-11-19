@@ -98,6 +98,10 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       return
     }
     mapRef.current = map
+    // ?debug exposes the map to automated QA (layer visibility, feature positions).
+    if (new URLSearchParams(window.location.search).has('debug')) {
+      ;(window as unknown as { __map: MlMap }).__map = map
+    }
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
     map.touchZoomRotate.disableRotation()
 
