@@ -59,7 +59,7 @@ const STYLES = {
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
 /** Draw order of the symbols, top first (a higher sort key draws on top). */
-const SORT: Partial<Record<SymbolId, number>> = { end: 7, start: 6, notravel: 5, rest: 4, 'rest-unknown': 4, break: 3, 'break-unknown': 3, severe: 2, high: 2 }
+const SORT: Partial<Record<SymbolId, number>> = { end: 7, start: 6, via: 6, notravel: 5, rest: 4, 'rest-unknown': 4, break: 3, 'break-unknown': 3, severe: 2, high: 2 }
 const GLIDE_MS = 350
 const FOLLOW_ZOOM = 7.5
 
@@ -265,6 +265,13 @@ export default function MapView(props: Props) {
       }
       const st = route.stops[m.ref]
       if (!st) return ''
+      if (st.kind === 'via') {
+        return (
+          `<div class="pop"><div class="pop-head">${symbolSvg('via', 18)}<b>${esc(st.place?.name ?? 'Your stop')}</b></div>` +
+          `<div>Your stop · mile ${Math.round(st.mile).toLocaleString('en-US')}</div>` +
+          `<div>Truck there ${clock(st.at, p.timezone)}</div></div>`
+        )
+      }
       return (
         `<div class="pop"><div class="pop-head">${symbolSvg(m.sym, 18)}<b>${st.kind === 'rest' ? '10-hour rest' : '30-minute break'}</b></div>` +
         (st.place

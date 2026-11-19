@@ -384,6 +384,15 @@
             "title": "Departure Local",
             "type": "string"
           },
+          "via": {
+            "description": "Stops to drive through, in order, between origin and destination",
+            "items": {
+              "$ref": "#/components/schemas/Place"
+            },
+            "maxItems": 3,
+            "title": "Via",
+            "type": "array"
+          },
           "cargo_lb": {
             "description": "Cargo weight in pounds",
             "maximum": 80000,

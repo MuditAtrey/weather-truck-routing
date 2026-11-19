@@ -71,6 +71,8 @@ interface Props {
 export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded }: Props) {
   const [origin, setOrigin] = useState<PlaceOption | null>(null)
   const [destination, setDestination] = useState<PlaceOption | null>(null)
+  // Stops to drive through, in order (like Google Maps' "Add stop"). Empty rows are ignored.
+  const [via, setVia] = useState<{ key: number; place: PlaceOption | null }[]>([])
   const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone)
   const [departure, setDeparture] = useState(() => localInputValue(tz, 30))
   const [departureTouched, setDepartureTouched] = useState(false)
@@ -113,6 +115,7 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded 
     return {
       origin: { lat: origin.lat, lon: origin.lon, label: origin.label },
       destination: { lat: destination.lat, lon: destination.lon, label: destination.label },
+      via: via.flatMap(({ place: v }) => (v ? [{ lat: v.lat, lon: v.lon, label: v.label }] : [])),
       departure_local: dep,
       cargo_lb: cargoNum,
       interval_mi: interval,
@@ -134,7 +137,7 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded 
       window.clearTimeout(t)
     }
     // buildRequest reads exactly the state listed here.
-  }, [origin, destination, cargo, interval, hos, departure, departureTouched, busy])
+  }, [origin, destination, via, cargo, interval, hos, departure, departureTouched, busy])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -148,6 +151,7 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded 
   const usePreset = (p: Preset) => {
     setOrigin(p.origin)
     setDestination(p.destination)
+    setVia([])
     setCargo(String(p.cargo))
     setDepartureTouched(false)
   }
@@ -155,7 +159,31 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded 
   return (
     <form className={`trip${folded ? ' folded' : ''}`} onSubmit={submit} noValidate>
       <PlaceInput label="Origin" value={origin} onChange={setOrigin} placeholder="City, address, or lat, lon" />
+      {via.map(({ key, place: v }, i) => (
+        <div className="via-row" key={key}>
+          <PlaceInput
+            label={`Stop ${i + 1}`}
+            value={v}
+            onChange={(p) => setVia((list) => list.map((x) => (x.key === key ? { key, place: p } : x)))}
+            placeholder="City or address to drive through"
+          />
+          <button
+            type="button"
+            className="ghost via-remove"
+            aria-label={`Remove stop ${i + 1}`}
+            title="Remove this stop"
+            onClick={() => setVia((list) => list.filter((x) => x.key !== key))}
+          >
+            ×
+          </button>
+        </div>
+      ))}
       <PlaceInput label="Destination" value={destination} onChange={setDestination} placeholder="City, address, or lat, lon" />
+      {via.length < 3 && (
+        <button type="button" className="link-btn add-stop" onClick={() => setVia((list) => [...list, { key: Date.now(), place: null }])}>
+          + Add a stop on the way
+        </button>
+      )}
       <div className="row when">
         <div className="field dep">
           <label htmlFor="dep">

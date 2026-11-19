@@ -193,6 +193,11 @@ export interface components {
              */
             departure_local: string;
             /**
+             * Via
+             * @description Stops to drive through, in order, between origin and destination
+             */
+            via?: components["schemas"]["Place"][];
+            /**
              * Cargo Lb
              * @description Cargo weight in pounds
              */

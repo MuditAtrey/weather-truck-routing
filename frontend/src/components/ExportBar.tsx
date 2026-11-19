@@ -22,7 +22,7 @@ interface Props {
   labels: [string, string]
 }
 
-const KIND = { truck_stop: 'Truck stop', public: 'Rest area', truck_parking: 'Truck parking' } as const
+const KIND = { truck_stop: 'Truck stop', public: 'Rest area', truck_parking: 'Truck parking', stop: 'Your stop' } as const
 
 export default function ExportBar({ plan, selected, labels }: Props) {
   const [copied, setCopied] = useState(false)
@@ -70,7 +70,17 @@ export default function ExportBar({ plan, selected, labels }: Props) {
               <div className="muted">Leave {t(plan.departure)}</div>
             </div>
           </li>
-          {stops.map((s, i) => (
+          {stops.map((s, i) =>
+            s.kind === 'via' ? (
+              <li key={i} className="it-via">
+                <Symbol id="via" size={20} />
+                <div>
+                  <strong>{s.place?.name ?? 'Your stop'}</strong>
+                  <div className="muted">Your stop · mile {Math.round(s.mile).toLocaleString('en-US')} · {t(s.at)}</div>
+                  <LegLinks i={i} />
+                </div>
+              </li>
+            ) : (
             <li key={i}>
               <Symbol id={stopSymbol(s.kind, !!s.place)} size={20} />
               <div>
@@ -96,7 +106,8 @@ export default function ExportBar({ plan, selected, labels }: Props) {
                 <LegLinks i={i} />
               </div>
             </li>
-          ))}
+            ),
+          )}
           <li>
             <Symbol id="end" size={20} />
             <div>

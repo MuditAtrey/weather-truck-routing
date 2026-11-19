@@ -11,14 +11,15 @@ Stack: React 19 + TypeScript + MapLibre GL (Vite) on the front end, Django 6 + D
 ## What it does
 
 1. **Three routes.** Trips under 1,500 km use Valhalla's truck profile with the load's weight. Longer trips are truck-routed in legs (see [Routing](#routing)). If fewer than three distinct routes come back, the gap is filled by routing through a point pushed sideways from the straight line.
-2. **Weather where the truck will be, when it will be there.** Checkpoints every 10, 25 or 50 miles (your choice) get the forecast for the truck's arrival time, including US hours-of-service breaks (on by default). Departures can be up to 7 days ahead.
-3. **Risk per checkpoint**, using the brief's thresholds and load rules exactly. The worst of wind, rain and snow sets the level.
-4. **A recommendation** using the brief's order: fewest Severe miles, then fewest High miles, then lowest average risk, then shortest time. Each route gets one line explaining the deciding criterion.
-5. **Rest stops at real places.** The 30-minute break and 10-hour rest go to the latest truck stop or rest area before the legal limit (4,687 sites from OpenStreetMap and U.S. DOT data), not to wherever the clock runs out. Stops with no known parking nearby are flagged.
-6. **A map** with all three routes. The selected one is coloured by risk with a dark outline; the others are grey. One warning sign marks the worst point of each High, Severe or No Travel stretch (No Travel stretches are also dashed), and hovering anywhere on a route shows that place's forecast. Start, destination, breaks and rests use the same symbols on the map, the timeline, the itinerary and the key.
-7. **A trip timeline.** Drag or play it and a truck drives the route on the road itself, at a steady speed, standing still during breaks and rests, with the road behind it greyed out. A strip under the slider shows the risk the truck meets each hour, and the readout names where it is ("Driving, mile 412 near Rawlins, WY · gusts 38 mph"). The slider fits the trip by default; one tap widens it to the full 48-hour window the heatmap covers (or longer, for trips over 48 hours). The map follows the truck while playing; dragging the map stops following and "Whole route" zooms back out. The weather heatmap, checkpoint dots and the gusts/sustained setting are under Layers.
-8. **Phones.** The map fills the screen and the results sit in a bottom sheet with three heights (the trip clock, half, full), like Google and Apple Maps, so a one-finger drag on the map always moves the map. The map keeps its centre, and the followed truck, above the sheet.
-9. **Send to the driver.** Per-leg links that open Google Maps, Apple Maps or Waze from one stop to the next, whole-trip links (Apple keeps all stops; Google a day at a time, 9 stops per link), a GPX file with the exact route and stops (validated against the GPX 1.1 schema), and a plain-text itinerary to copy. Each link format was checked in a browser for what it really opens.
+2. **Stops on the way.** Up to three stops between origin and destination (Seattle to Washington DC via Columbus), like Google Maps' "Add stop". Each leg is routed on its own and the legs are joined in order; option B of the trip uses each leg's second-best road, and so on, so the three choices stay different. Stops are pass-through (no loading time) and appear on the map, timeline, itinerary and every export.
+3. **Weather where the truck will be, when it will be there.** Checkpoints every 10, 25 or 50 miles (your choice) get the forecast for the truck's arrival time, including US hours-of-service breaks (on by default). Departures can be up to 7 days ahead.
+4. **Risk per checkpoint**, using the brief's thresholds and load rules exactly. The worst of wind, rain and snow sets the level.
+5. **A recommendation** using the brief's order: fewest Severe miles, then fewest High miles, then lowest average risk, then shortest time. Each route gets one line explaining the deciding criterion.
+6. **Rest stops at real places.** The 30-minute break and 10-hour rest go to the latest truck stop or rest area before the legal limit (4,687 sites from OpenStreetMap and U.S. DOT data), not to wherever the clock runs out. Stops with no known parking nearby are flagged.
+7. **A map** with all three routes. The selected one is coloured by risk with a dark outline; the others are grey. One warning sign marks the worst point of each High, Severe or No Travel stretch (No Travel stretches are also dashed), and hovering anywhere on a route shows that place's forecast. Start, destination, your stops, breaks and rests use the same symbols on the map, the timeline, the itinerary and the key.
+8. **A trip timeline.** Drag or play it and a truck drives the route on the road itself, at a steady speed, standing still during breaks and rests, with the road behind it greyed out. A strip under the slider shows the risk the truck meets each hour, and the readout names where it is ("Driving, mile 412 near Rawlins, WY · gusts 38 mph"). The slider fits the trip by default; one tap widens it to the full 48-hour window the heatmap covers (or longer, for trips over 48 hours). Playing keeps the camera still, so you can zoom in yourself; it frames the whole trip first on the first play or when the truck is off screen. "Follow truck" is there if you want it, and "Whole route" zooms back out. The weather heatmap, checkpoint dots and the gusts/sustained setting are under Layers.
+9. **Phones.** The map fills the screen and the results sit in a bottom sheet with three heights (the trip clock, half, full), like Google and Apple Maps, so a one-finger drag on the map always moves the map. The map keeps its centre and the truck above the sheet.
+10. **Send to the driver.** Per-leg links that open Google Maps, Apple Maps or Waze from one stop to the next, whole-trip links (Apple keeps all stops; Google a day at a time, 9 stops per link), a GPX file with the exact route and stops (validated against the GPX 1.1 schema), and a plain-text itinerary to copy. Each link format was checked in a browser for what it really opens.
 
 ## How it works
 
@@ -70,6 +71,7 @@ Each of these is pinned by a test.
 | Missing forecasts | Ranked twice, once as Low and once as No Travel. A route is recommended only if it wins both ways. | Unknown weather must not decide or hide a recommendation. |
 | Miles per checkpoint | Each checkpoint stands for the road halfway to each neighbour, so the miles add up exactly to the route length. | Fair at the ends and for short trips. |
 | Departure time | Wall-clock time at the origin, in the origin's time zone (not the browser's). Times that do not exist (a spring-forward gap) are rejected. | A dispatcher in Denver means Denver time. |
+| Stops the user adds | Pass-through, in the order given, with no loading time; the truck must reach each one (a detour to a stop is never trimmed). | The brief has no stops; this is the simplest honest model, and it is shown as such. |
 | Travel time | Driving time plus hours-of-service stops: a 30-minute break after 8 hours and a 10-hour rest after 11 hours of driving. Can be switched off. | A 13-hour drive is a 24-hour trip. |
 | Heatmap | Interpolated from each cell's actual severity value, not a point-density heatmap. Its whole-number part always equals the risk level, so it cannot disagree with the scoring. | A density heatmap shows where samples cluster, not where the weather is. |
 
@@ -123,13 +125,13 @@ backend/planner/
   api.py         Django Ninja endpoints and error mapping
   schemas.py     request and response models (source of the OpenAPI spec)
   data/          truck stops and rest areas (built by scripts/truck_stops/build.py)
-backend/tests/   128 tests; recorded router responses, no network
+backend/tests/   134 tests; recorded router responses, no network
 frontend/src/
   api/           typed client; schema.d.ts is generated from the OpenAPI spec
   lib/           weather download, heatmap canvas, route segments, truck position
                  along the road, hazard markers, shared symbols, exports, verdicts
   components/    form, place search, route cards, itinerary, map, timeline, key
-  test/          29 tests (exports, truck position, hazards, verdicts, weather)
+  test/          32 tests (exports, stops, truck position, hazards, verdicts, weather)
 ```
 
 Django Ninja rather than Django REST Framework: the plan endpoint makes several outbound calls, Ninja runs them natively async, and its Pydantic schemas generate the OpenAPI spec the frontend's types come from. I know Spotter uses DRF; the domain and provider code would move over unchanged.

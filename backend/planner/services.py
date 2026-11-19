@@ -8,6 +8,7 @@ a signed token, so /score can trust the checkpoints and times without storing an
 
 import base64
 import functools
+import itertools
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,9 +22,10 @@ from .domain import rest_stops
 from .domain.forecast import HOUR, Series, ceil_hour, floor_hour, sample_at, sample_hour
 from .domain.geo import LatLon, haversine_mi
 from .domain.grid import corridor
+from .domain.route import Route
 from .domain.scoring import WindMode, point_index, point_risk, rank, summarize
 from .providers import openmeteo
-from .providers.router import find_routes
+from .providers.router import find_trip
 from .schemas import PlanIn, PointWeather, ScoreIn
 
 TOKEN_SALT = "plan.v1"  # noqa: S105 (a namespace, not a secret)
@@ -113,14 +115,22 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
     now = now or datetime.now(UTC)
     origin: LatLon = (req.origin.lat, req.origin.lon)
     dest: LatLon = (req.destination.lat, req.destination.lon)
-    if haversine_mi(origin, dest) < MIN_TRIP_MI:
-        raise PlanError("same_place", "Origin and destination are less than a mile apart")
+    vias: list[LatLon] = [(v.lat, v.lon) for v in req.via]
+    through = [origin, *vias, dest]
+    if any(haversine_mi(a, b) < MIN_TRIP_MI for a, b in itertools.pairwise(through)):
+        raise PlanError(
+            "same_place",
+            "Origin and destination are less than a mile apart"
+            if not vias
+            else "Two places in a row are less than a mile apart",
+        )
 
     tz_name = timezone_at(origin)
     departure = resolve_departure(req.departure_local, tz_name, now)
     dep_epoch = int(departure.timestamp())
 
-    result = await find_routes(origin, dest, req.cargo_lb)
+    trip = await find_trip(through, req.cargo_lb)
+    result = trip.routing
 
     points = _Points.empty()
     route_features: list[dict[str, Any]] = []
@@ -147,9 +157,7 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
                     "source": route.source,
                     "via": bool(route.via),
                     "warnings": sorted(set(route.warnings)),
-                    "stops": [_stop_json(st, schedule, dep_epoch) for st in schedule.stops]
-                    if schedule
-                    else [],
+                    "stops": _stops_json(route, schedule, dep_epoch, req, trip.stop_miles[rid]),
                 },
                 rid + 1,
             )
@@ -248,6 +256,42 @@ def _stop_json(st: rest_stops.Stop, schedule: rest_stops.Schedule, dep: int) -> 
             "source": "U.S. DOT NTAD" if site.source == "ntad" else "OpenStreetMap",
         },
     }
+
+
+def _stops_json(
+    route: Route,
+    schedule: rest_stops.Schedule | None,
+    dep: int,
+    req: PlanIn,
+    via_miles: list[float],
+) -> list[dict[str, Any]]:
+    """Required rest stops and the user's own stops, in driving order."""
+    out = [_stop_json(st, schedule, dep) for st in schedule.stops] if schedule else []
+    for place, mile in zip(req.via, via_miles, strict=True):
+        drive_s = cp.drive_seconds_at(route, mile)
+        at = dep + (schedule.elapsed(drive_s) if schedule else drive_s)
+        out.append(
+            {
+                "kind": "via",
+                "lat": round(place.lat, 5),
+                "lon": round(place.lon, 5),
+                "mile": round(mile, 1),
+                "at": round(at),
+                "duration_s": 0,
+                "early_min": 0,
+                "place": {
+                    "name": place.label or f"{place.lat:.4f}, {place.lon:.4f}",
+                    "kind": "stop",
+                    "road": None,
+                    "spaces": None,
+                    "off_route_mi": 0,
+                    "lat": place.lat,
+                    "lon": place.lon,
+                    "source": "user",
+                },
+            }
+        )
+    return sorted(out, key=lambda s: (s["mile"], s["kind"] != "via"))
 
 
 def _level_char(level: int | None) -> str:

@@ -100,6 +100,10 @@ button.primary { flex: 1; padding: 11px; border: 0; border-radius: 8px; backgrou
 button.primary:disabled { opacity: 0.6; cursor: progress; }
 .ghost { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--raise); cursor: pointer; color: var(--ink); font-size: 14px; }
 .ghost:disabled { opacity: 0.5; cursor: default; }
+.via-row { display: flex; gap: 8px; align-items: flex-end; }
+.via-row .field { flex: 1; }
+.via-remove { flex: none; width: 42px; height: 42px; padding: 0; font-size: 20px; line-height: 1; }
+.add-stop { margin-top: -4px; }
 .link-btn { align-self: flex-start; border: 0; background: none; padding: 4px 0; color: var(--link); font-weight: 600; cursor: pointer; font-size: 14px; }
 .presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; }
 .chip { padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--chip); cursor: pointer; font-size: 13px; }

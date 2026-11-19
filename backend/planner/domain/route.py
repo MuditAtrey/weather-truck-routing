@@ -132,8 +132,13 @@ def _cut_spur(coords: list[LatLon], cum_s: list[float], joint: int) -> int:
     return 0
 
 
-def join(legs: Sequence[Route], source: str) -> Route:
-    """Stitch consecutive legs into one route, carrying distance and time across joins."""
+def join(legs: Sequence[Route], source: str, cut_spurs: bool = True) -> Route:
+    """Stitch consecutive legs into one route, carrying distance and time across joins.
+
+    `cut_spurs` removes out-and-back detours at joins, which only appear where we chose
+    the join point ourselves. At a stop the user asked for, the truck really goes there,
+    so the caller turns it off.
+    """
     coords: list[LatLon] = []
     cum_s: list[float] = []
     joints: list[int] = []
@@ -145,7 +150,7 @@ def join(legs: Sequence[Route], source: str) -> Route:
         coords.extend(leg.coords[skip:])
         cum_s.extend(offset + t for t in leg.cum_drive_s[skip:])
     removed = 0
-    for joint in joints:
+    for joint in joints if cut_spurs else []:
         removed += _cut_spur(coords, cum_s, joint - removed)
     joined = Route(coords=coords, cum_mi=cumulative_miles(coords), cum_drive_s=cum_s, source=source)
     joined.warnings = sorted({w for leg in legs for w in leg.warnings})

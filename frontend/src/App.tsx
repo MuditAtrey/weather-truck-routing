@@ -132,7 +132,7 @@ export default function App() {
         try {
           const s = await api.score(p.token, p.weather_points.map(missing), signal, true)
           if (!s.server_weather_ok) {
-            const why = s.server_weather_error || ''
+            const why = (s.server_weather_error || '').replace(/\.\s*$/, '')
             const when = /daily/i.test(why) ? 'tomorrow' : /hourly/i.test(why) ? 'within the hour' : 'in a minute'
             throw new Error(
               `${e.message} The server's weather allowance is used up too (${why || 'service unavailable'}). Try again ${when}.`,
@@ -198,6 +198,7 @@ export default function App() {
   const status = result?.ranking.status
   const warnings = plan?.warnings.filter((w) => WARNINGS[w]) ?? []
 
+  const viaNames = (plan?.routes.features[0]?.properties.stops ?? []).filter((s) => s.kind === 'via').map((s) => s.place?.name ?? 'Stop')
   const phoneSheet = isPhone && !!plan
   const timeline = plan ? (
     <Timeline
@@ -217,8 +218,18 @@ export default function App() {
           <div className="trip-summary">
             <div>
               <h2>
-                {labels[0]} <span aria-hidden>→</span>
-                <span className="sr-only"> to </span> {labels[1]}
+                {[labels[0], ...viaNames, labels[1]].map((name, i, all) => (
+                  <span key={i}>
+                    {name}
+                    {i < all.length - 1 && (
+                      <>
+                        {' '}
+                        <span aria-hidden>→</span>
+                        <span className="sr-only"> to </span>{' '}
+                      </>
+                    )}
+                  </span>
+                ))}
               </h2>
               <p className="muted small">
                 Leave {clock(plan.departure, plan.timezone)}

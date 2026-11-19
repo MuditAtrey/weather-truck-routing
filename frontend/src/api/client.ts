@@ -21,7 +21,7 @@ export interface RouteProps {
   via: boolean
   warnings: string[]
   stops: {
-    kind: 'break' | 'rest'
+    kind: 'break' | 'rest' | 'via' // via: a stop the user added (duration 0)
     lat: number
     lon: number
     mile: number
@@ -30,7 +30,7 @@ export interface RouteProps {
     early_min: number
     place: {
       name: string
-      kind: 'truck_stop' | 'public' | 'truck_parking'
+      kind: 'truck_stop' | 'public' | 'truck_parking' | 'stop'
       road: string | null
       spaces: number | null
       off_route_mi: number

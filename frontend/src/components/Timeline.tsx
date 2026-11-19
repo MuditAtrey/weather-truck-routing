@@ -265,7 +265,11 @@ export default function Timeline({ plan, score, selected, mode }: Props) {
               <Symbol id="start" size={14} title={`Depart ${clock(departure, timeZone)}`} />
             </span>
             {route.stops.map((s, i) =>
-              s.kind === 'rest' ? (
+              s.kind === 'via' ? (
+                <span key={i} className="ev" style={{ left: pct(s.at) }}>
+                  <Symbol id="via" size={14} title={`Stop: ${s.place?.name ?? ''} ${clock(s.at, timeZone)}`} />
+                </span>
+              ) : s.kind === 'rest' ? (
                 <span key={i} className="ev-rest" style={{ left: pct(s.at), width: `calc(${pct(s.at + s.duration_s)} - ${pct(s.at)})` }} title={`10-hour rest ${clock(s.at, timeZone)}`}>
                   <Symbol id={stopSymbol('rest', !!s.place)} size={14} />
                 </span>

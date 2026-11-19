@@ -12,6 +12,10 @@
    truck-routed (arriving and leaving in the direction of travel so joins have no
    U-turns), and the legs are stitched together. If any leg fails, the plan keeps the
    OSRM routes and says so.
+5. Trips with stops the user adds (A to B to C) are routed one leg at a time, each leg
+   getting its own options, and the legs are joined in order. Option k of the whole
+   trip uses option k of every leg (or that leg's last option if it has fewer), so the
+   three choices stay genuinely different without trying every combination.
 """
 
 import asyncio
@@ -287,3 +291,40 @@ async def find_routes(origin: LatLon, dest: LatLon, cargo_lb: int) -> RoutingRes
     result = RoutingResult(routes, provider, reason, sorted(set(warnings)), legs)
     cache.set(key, result, CACHE_S)
     return result
+
+
+@dataclass(slots=True)
+class TripResult:
+    routing: RoutingResult
+    stop_miles: list[list[float]]  # per route: the mile at which each user stop is reached
+
+
+async def find_trip(points: list[LatLon], cargo_lb: int) -> TripResult:
+    """Routes through the user's points in order (origin, stops..., destination)."""
+    if len(points) == 2:
+        res = await find_routes(points[0], points[1], cargo_lb)
+        return TripResult(res, [[] for _ in res.routes])
+    # One leg at a time: the public servers allow two connections, and a long leg
+    # already uses both.
+    parts = [await find_routes(a, b, cargo_lb) for a, b in itertools.pairwise(points)]
+    options = min(TARGET_ROUTES, max(len(p.routes) for p in parts))
+    routes: list[Route] = []
+    stop_miles: list[list[float]] = []
+    seen: set[tuple[int, ...]] = set()
+    for k in range(options):
+        pick = tuple(min(k, len(p.routes) - 1) for p in parts)
+        if pick in seen:
+            continue
+        seen.add(pick)
+        legs = [p.routes[i] for p, i in zip(parts, pick, strict=True)]
+        source = "valhalla" if all(leg.source == "valhalla" for leg in legs) else "osrm"
+        routes.append(join(legs, source, cut_spurs=False))
+        stop_miles.append(list(itertools.accumulate(leg.distance_mi for leg in legs))[:-1])
+    provider = "valhalla" if all(p.provider == "valhalla" for p in parts) else "osrm"
+    reason = next((p.fallback_reason for p in parts if p.fallback_reason), None)
+    warnings = {w for p in parts for w in p.warnings if w != "fewer_than_3_routes"}
+    if len(routes) < TARGET_ROUTES:
+        warnings.add("fewer_than_3_routes")
+    legs_used = sum(p.legs for p in parts)
+    result = RoutingResult(routes, provider, reason, sorted(warnings), legs_used)
+    return TripResult(result, stop_miles)

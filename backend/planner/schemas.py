@@ -21,6 +21,11 @@ class PlanIn(Schema):
         description="Departure as wall-clock time at the origin, YYYY-MM-DDTHH:MM",
         pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$",
     )
+    via: list[Place] = Field(
+        default_factory=list,
+        max_length=3,
+        description="Stops to drive through, in order, between origin and destination",
+    )
     cargo_lb: int = Field(ge=0, le=80_000, description="Cargo weight in pounds")
     interval_mi: Literal[10, 25, 50] = 25
     hos: bool = Field(default=True, description="Add US hours-of-service breaks to ETAs")

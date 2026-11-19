@@ -5,7 +5,7 @@ import { LEVEL_COLORS, LEVELS, OTHER_ROUTE, THRESHOLDS, UNKNOWN_COLOR, type Wind
 import { SYMBOL_LABEL, type SymbolId } from '../lib/symbols'
 import Symbol from './Symbol'
 
-const KEY_SYMBOLS: SymbolId[] = ['start', 'end', 'break', 'rest', 'rest-unknown', 'high', 'severe', 'notravel', 'truck']
+const KEY_SYMBOLS: SymbolId[] = ['start', 'end', 'via', 'break', 'rest', 'rest-unknown', 'high', 'severe', 'notravel', 'truck']
 
 function Line({ color, dashed }: { color: string; dashed?: boolean }) {
   return (

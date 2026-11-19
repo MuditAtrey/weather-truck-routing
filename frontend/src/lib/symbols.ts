@@ -7,7 +7,7 @@
 // only for No Travel.
 import { LEVEL_COLORS } from './risk'
 
-export type SymbolId = 'start' | 'end' | 'break' | 'rest' | 'break-unknown' | 'rest-unknown' | 'high' | 'severe' | 'notravel' | 'truck'
+export type SymbolId = 'start' | 'end' | 'via' | 'break' | 'rest' | 'break-unknown' | 'rest-unknown' | 'high' | 'severe' | 'notravel' | 'truck'
 
 interface Part {
   d: string
@@ -39,6 +39,10 @@ const PARTS: Record<SymbolId, Part[]> = {
     { d: 'M12 1.5a10.5 10.5 0 1 1 0 21 10.5 10.5 0 0 1 0-21z', fill: INK, stroke: WHITE, width: 2 },
     { d: 'M9 6.5v11', stroke: WHITE, width: 1.8 },
     { d: 'M9.6 6.5h7l-2 3 2 3h-7z', fill: WHITE },
+  ],
+  via: [
+    { d: 'M12 2.5a9.5 9.5 0 1 1 0 19 9.5 9.5 0 0 1 0-19z', fill: WHITE, stroke: NAVY, width: 4 },
+    { d: 'M12 8.6a3.4 3.4 0 1 1 0 6.8 3.4 3.4 0 0 1 0-6.8z', fill: NAVY },
   ],
   break: [{ d: roundSquare, fill: NAVY, stroke: WHITE, width: 2 }, ...cup],
   rest: [{ d: roundSquare, fill: NAVY, stroke: WHITE, width: 2 }, ...bed],
@@ -104,6 +108,7 @@ export function symbolImage(id: SymbolId, size: number): ImageData {
 export const MAP_SIZES: Record<SymbolId, number> = {
   start: 18,
   end: 24,
+  via: 22,
   break: 22,
   rest: 26,
   'break-unknown': 22,
@@ -117,6 +122,7 @@ export const MAP_SIZES: Record<SymbolId, number> = {
 export const SYMBOL_LABEL: Record<SymbolId, string> = {
   start: 'Start',
   end: 'Destination',
+  via: 'Your stop',
   break: '30-minute break',
   rest: '10-hour rest',
   'break-unknown': '30-minute break, no known truck parking',
@@ -127,7 +133,8 @@ export const SYMBOL_LABEL: Record<SymbolId, string> = {
   truck: 'Truck at the selected time',
 }
 
-export function stopSymbol(kind: 'break' | 'rest', known: boolean): SymbolId {
+export function stopSymbol(kind: 'break' | 'rest' | 'via', known: boolean): SymbolId {
+  if (kind === 'via') return 'via'
   return known ? kind : (`${kind}-unknown` as SymbolId)
 }
 

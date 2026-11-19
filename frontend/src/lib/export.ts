@@ -17,7 +17,7 @@ export interface Leg {
   toLabel: string
 }
 
-const STOP_NAME = { break: '30-minute break', rest: '10-hour rest' } as const
+const STOP_NAME = { break: '30-minute break', rest: '10-hour rest', via: 'Stop' } as const
 const ll = ([lat, lon]: [number, number]) => `${lat.toFixed(5)},${lon.toFixed(5)}`
 const R_MI = 3958.7613
 
@@ -31,6 +31,7 @@ export function stopPoint(s: RouteStop): [number, number] {
 }
 
 export function stopTitle(s: RouteStop): string {
+  if (s.kind === 'via') return s.place?.name ?? 'Stop'
   if (!s.place) return `${STOP_NAME[s.kind]} (no known truck parking)`
   return `${STOP_NAME[s.kind]} at ${s.place.name}`
 }
@@ -98,8 +99,9 @@ export function googleDayLinks(route: RouteFeature, labels?: [string, string]): 
   for (let d = 0; d + 1 < bounds.length; d++) {
     const a = bounds[d]!
     const b = bounds[d + 1]!
+    // Breaks and the user's own stops must be kept; route points fill the rest.
     const breaks = stops
-      .filter((s) => s.kind === 'break' && s.mile > a.mile && s.mile < b.mile)
+      .filter((s) => (s.kind === 'break' || s.kind === 'via') && s.mile > a.mile && s.mile < b.mile)
       .map((s) => ({ mile: s.mile, p: stopPoint(s) }))
     const fill = corridor(route, a.mile, b.mile, 9 - breaks.length)
     const via = [...breaks, ...fill].sort((x, y) => x.mile - y.mile).map((w) => w.p)
@@ -161,6 +163,10 @@ export function itineraryText(
     '',
   ]
   for (const s of stopsOf(route)) {
+    if (s.kind === 'via') {
+      lines.push(`- Mile ${Math.round(s.mile)}, ${clock(s.at)}: stop at ${s.place?.name ?? 'your stop'}`)
+      continue
+    }
     const where = s.place
       ? `${s.place.name}${s.place.road ? ` (${s.place.road})` : ''}${s.place.spaces ? `, ${s.place.spaces} truck spaces` : ''}`
       : 'no known truck parking nearby, plan ahead'
@@ -187,6 +193,7 @@ export function gpx(plan: Plan, route: RouteFeature, labels: [string, string]): 
   const arrive = plan.departure + route.properties.trip_s
   const stops = stopsOf(route)
   const stopDesc = (s: RouteStop) =>
+    s.kind === 'via' ? `Stop; mile ${Math.round(s.mile)}` :
     `Mile ${Math.round(s.mile)}; ${Math.round(s.duration_s / 60)} min` +
     (s.place?.spaces ? `; ${s.place.spaces} truck spaces` : '')
   const wpts = [
