@@ -5,6 +5,7 @@ import Legend from './components/Legend'
 import RouteCards from './components/RouteCards'
 import Timeline from './components/Timeline'
 import TripForm from './components/TripForm'
+import { clock } from './lib/format'
 import { hourStore } from './lib/hourStore'
 import type { WindMode } from './lib/risk'
 import { BrowserWeatherUnavailable, fetchForecasts, missing } from './lib/weather'
@@ -51,7 +52,10 @@ export default function App() {
   const [selected, setSelected] = useState(0)
   // Trucks are blown over by gusts, not average wind, so gusts drive the recommendation.
   const [mode, setMode] = useState<WindMode>('gust')
-  const [heatmapOn, setHeatmapOn] = useState(true)
+  // The heatmap is a backdrop for "why", off until asked for; the route line carries the answer.
+  const [heatmapOn, setHeatmapOn] = useState(false)
+  const [checkpointsOn, setCheckpointsOn] = useState(true)
+  const [follow, setFollow] = useState(false)
   const [serverWeather, setServerWeather] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
@@ -158,6 +162,7 @@ export default function App() {
       if (c.signal.aborted) return
       setPlan(p)
       setSelected(0)
+      setFollow(false)
       await runWeather(p, c.signal)
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
@@ -189,32 +194,49 @@ export default function App() {
   const warnings = plan?.warnings.filter((w) => WARNINGS[w]) ?? []
 
   return (
-    <div className={`app${plan && !editing ? ' has-plan' : ''}`}>
+    <div className={`app${plan ? ' has-plan' : ''}`}>
+      <header className="brand">
+        <svg viewBox="0 0 32 32" aria-hidden className="logo">
+          <rect width="32" height="32" rx="8" />
+          <path d="M7 21h14v-8h4l3 4v4h-2" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
+          <circle cx="11" cy="22" r="2" fill="#fff" />
+          <circle cx="23" cy="22" r="2" fill="#fff" />
+        </svg>
+        <h1>Weather-aware truck routing</h1>
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')}
+          title="Colour theme: Auto follows your device"
+        >
+          {theme === 'auto' ? 'Auto' : theme === 'dark' ? 'Dark' : 'Light'}
+        </button>
+      </header>
       <aside className="panel">
-        <header className="brand">
-          <svg viewBox="0 0 32 32" aria-hidden className="logo">
-            <rect width="32" height="32" rx="8" />
-            <path d="M7 21h14v-8h4l3 4v4h-2" fill="none" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
-            <circle cx="11" cy="22" r="2" fill="#fff" />
-            <circle cx="23" cy="22" r="2" fill="#fff" />
-          </svg>
-          <div className="brand-text">
-            <h1>Weather-aware truck routing</h1>
-            <p className="muted">Three routes, scored on forecast wind, rain and snow at the truck’s arrival time.</p>
-          </div>
-          <button
-            type="button"
-            className="theme-toggle"
-            onClick={() => setTheme(theme === 'auto' ? 'dark' : theme === 'dark' ? 'light' : 'auto')}
-            title="Colour theme: follows your device on Auto"
-          >
-            {theme === 'auto' ? 'Auto' : theme === 'dark' ? 'Dark' : 'Light'}
-          </button>
-        </header>
+        {!plan && (
+          <p className="intro muted">Three truck routes, rated on forecast gusts, rain and snow at the hour the truck reaches each place.</p>
+        )}
 
         {plan && !editing && (
-          <button type="button" className="ghost edit-trip" onClick={() => setEditing(true)}>
-            Edit trip
+          <div className="trip-summary">
+            <div>
+              <h2>
+                {labels[0]} <span aria-hidden>→</span>
+                <span className="sr-only"> to </span> {labels[1]}
+              </h2>
+              <p className="muted small">
+                Leave {clock(plan.departure, plan.timezone)}
+                {lastRequest.current ? ` · ${lastRequest.current.cargo_lb.toLocaleString('en-US')} lb` : ''}
+              </p>
+            </div>
+            <button type="button" className="ghost" onClick={() => setEditing(true)} disabled={busy}>
+              Edit trip
+            </button>
+          </div>
+        )}
+        {plan && editing && (
+          <button type="button" className="link-btn" onClick={() => setEditing(false)}>
+            ← Back to the routes
           </button>
         )}
         <TripForm
@@ -255,24 +277,14 @@ export default function App() {
 
           {plan && (
             <>
-              <div className="trip-summary">
-                <h2>
-                  {labels[0]} <span aria-hidden>→</span>
-                  <span className="sr-only"> to </span> {labels[1]}
-                </h2>
-                <span className={`router ${plan.router.provider}`} title="Which routing service answered">
-                  {plan.router.provider === 'valhalla'
-                    ? `Truck routing · Valhalla${(plan.router.legs ?? 1) > 1 ? `, ${plan.router.legs} legs` : ''}`
-                    : 'Car routing · OSRM'}
-                </span>
-              </div>
-              {fetchedAt && score && (
-                <p className="freshness">
-                  Forecast from Open-Meteo{serverWeather ? ' (via the server)' : ''}, fetched{' '}
-                  {new Date(fetchedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} your time.
-                  Risk is rated on {mode === 'gust' ? 'gusts' : 'sustained wind'}.
-                </p>
-              )}
+              <p className="freshness">
+                {plan.router.provider === 'valhalla'
+                  ? `Truck routes from Valhalla${(plan.router.legs ?? 1) > 1 ? ` (${plan.router.legs} legs)` : ''}`
+                  : 'Car routes from OSRM'}
+                {fetchedAt && score
+                  ? `. Forecast from Open-Meteo${serverWeather ? ' via the server' : ''} at ${new Date(fetchedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}, rated on ${mode === 'gust' ? 'gusts' : 'sustained wind'}.`
+                  : '.'}
+              </p>
               {plan.router.fallback_reason && <p className="notice info">{FALLBACK[plan.router.fallback_reason]}</p>}
               {warnings.map((w) => (
                 <p key={w} className="notice info">
@@ -280,11 +292,6 @@ export default function App() {
                 </p>
               ))}
               {status && status !== 'ok' && <p className="notice warn">{STATUS[status]}</p>}
-              {serverWeather && (
-                <p className="notice info">
-                  This network’s weather quota is used up, so the server downloaded the forecasts instead.
-                </p>
-              )}
               <RouteCards
                 plan={plan}
                 score={score}
@@ -295,11 +302,15 @@ export default function App() {
                 onSelect={setSelected}
               />
               <ExportBar plan={plan} selected={selected} labels={labels} />
-              <p className="footnote muted">
-                Risk is rated at each checkpoint, at the truck’s estimated arrival time, and each checkpoint counts for
-                the road halfway to its neighbours. Ranking: US-only routes first, then fewest No Travel, Severe and High miles,
-                then lowest average risk, then shortest time.
-              </p>
+              <details className="section">
+                <summary>How routes are ranked</summary>
+                <p className="small">
+                  Each checkpoint is rated at the truck’s estimated arrival time and stands for the road halfway to its
+                  neighbours. Routes that stay in the US come first, then the fewest No Travel, Severe and High miles,
+                  then the lowest average risk, then the shortest trip. Missing forecasts count as No Travel when
+                  ranking, so a gap can never make a route look safer.
+                </p>
+              </details>
             </>
           )}
           {!plan && phase.kind === 'idle' && (
@@ -308,38 +319,55 @@ export default function App() {
         </section>
 
         <footer className="credits muted">
-          Routes © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> via{' '}
-          <a href="https://valhalla.openstreetmap.de">FOSSGIS Valhalla</a> and{' '}
-          <a href="https://project-osrm.org">OSRM</a> (
-          <a href="https://www.openstreetmap.org/fixthemap">fix the map</a>). Weather by{' '}
-          <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0). Places by{' '}
-          <a href="https://photon.komoot.io">Photon</a>. Truck parking: OpenStreetMap (ODbL) and U.S. DOT BTS NTAD
-          Truck Stop Parking (2019). Non-commercial demo; places you type are sent to these services.
-          {import.meta.env.VITE_OPERATOR_EMAIL && (
-            <>
-              {' '}Contact: <a href={`mailto:${import.meta.env.VITE_OPERATOR_EMAIL}`}>{import.meta.env.VITE_OPERATOR_EMAIL}</a>.
-            </>
-          )}
+          <details>
+            <summary>
+              Data: OpenStreetMap, Valhalla, OSRM, Open-Meteo, Photon, U.S. DOT
+            </summary>
+            Routes © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> via{' '}
+            <a href="https://valhalla.openstreetmap.de">FOSSGIS Valhalla</a> and{' '}
+            <a href="https://project-osrm.org">OSRM</a> (
+            <a href="https://www.openstreetmap.org/fixthemap">fix the map</a>). Weather by{' '}
+            <a href="https://open-meteo.com/">Open-Meteo.com</a> (CC BY 4.0). Places by{' '}
+            <a href="https://photon.komoot.io">Photon</a>. Truck parking: OpenStreetMap (ODbL) and U.S. DOT BTS NTAD
+            Truck Stop Parking (2019). Non-commercial demo; places you type are sent to these services.
+            {import.meta.env.VITE_OPERATOR_EMAIL && (
+              <>
+                {' '}Contact: <a href={`mailto:${import.meta.env.VITE_OPERATOR_EMAIL}`}>{import.meta.env.VITE_OPERATOR_EMAIL}</a>.
+              </>
+            )}
+          </details>
         </footer>
       </aside>
 
       <main className="stage">
         <Suspense fallback={<div className="map map-loading" />}>
-          <MapView plan={plan} score={score} mode={mode} selected={selected} heatmapOn={heatmapOn} onSelect={setSelected} dark={dark} />
+          <MapView
+            plan={plan}
+            score={score}
+            mode={mode}
+            selected={selected}
+            labels={labels}
+            heatmapOn={heatmapOn}
+            checkpointsOn={checkpointsOn}
+            follow={follow}
+            onFollow={setFollow}
+            onSelect={setSelected}
+            onMode={setMode}
+            onHeatmap={setHeatmapOn}
+            onCheckpoints={setCheckpointsOn}
+            dark={dark}
+          />
         </Suspense>
-        <Legend />
+        {plan && <Legend mode={mode} />}
         {plan && (
           <Timeline
-            hours={plan.hours}
-            departure={plan.departure}
-            timeZone={plan.timezone}
             plan={plan}
             score={score}
             selected={selected}
             mode={mode}
-            onMode={setMode}
-            heatmapOn={heatmapOn}
-            onHeatmap={setHeatmapOn}
+            onPlaying={(on) => {
+              if (on) setFollow(true)
+            }}
           />
         )}
       </main>

@@ -1,10 +1,16 @@
 // The map is created once and driven imperatively; React never re-renders it.
 //
 // Layers, bottom to top:
-//   heat        smooth risk surface (canvas image), redrawn when the slider hour changes
-//   route-*     all routes in grey; the selected one is drawn as risk-coloured segments
-//   cp          checkpoint dots on the selected route (they grow as you zoom in)
-//   truck       where the truck is at the slider's hour
+//   heat           smooth risk surface (canvas image), off by default, redrawn per hour
+//   other-*        the alternative routes: a plain grey line, so grey only ever means
+//                  "another route"
+//   sel-casing     dark outline that keeps the selected route readable on any basemap
+//   sel-line       the selected route coloured by risk; the part behind the truck fades
+//   sel-nt         white dashes over No Travel stretches (not colour alone)
+//   cp             checkpoint dots, only when zoomed in and switched on
+//   marks          start, destination, stops and one warning per risky stretch, drawn
+//                  with the same symbols as the timeline, itinerary and key
+//   truck          where the truck is at the slider's time, on the road, facing its way
 // Risk colours come from feature-state, so changing wind mode never re-uploads geometry.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -15,17 +21,32 @@ import {
   type CanvasSource,
   type GeoJSONSource,
   type LngLatBoundsLike,
+  type MapGeoJSONFeature,
   type MapLayerMouseEvent,
 } from 'maplibre-gl'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Feature, FeatureCollection, Point } from 'geojson'
 import type { Plan, ScoreOut } from '../api/client'
+import { stopPoint } from '../lib/export'
 import { clock, num } from '../lib/format'
+import { hazards } from '../lib/hazards'
 import { createHeatCanvas, decodeHours } from '../lib/heatCanvas'
 import { hourStore } from '../lib/hourStore'
-import { DRIVERS, LEVEL_COLORS, LEVELS, UNKNOWN_COLOR, levelAt, type WindMode } from '../lib/risk'
+import {
+  DRIVERS,
+  LEVEL_COLORS,
+  LEVELS,
+  LOW_DARK,
+  OTHER_ROUTE,
+  OTHER_ROUTE_DARK,
+  UNKNOWN_COLOR,
+  levelAt,
+  type WindMode,
+} from '../lib/risk'
 import { routeSegments } from '../lib/segments'
+import { ALL_SYMBOLS, MAP_SIZES, SYMBOL_LABEL, hazardSymbol, stopSymbol, symbolImage, symbolSvg, type SymbolId } from '../lib/symbols'
+import { createTrack } from '../lib/track'
 
 setWorkerUrl(workerUrl)
 
@@ -35,33 +56,10 @@ const STYLES = {
 }
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
-const SELECTED_LOW = '#1e3a8a' // the selected route reads as "selected" where risk is Low
-
-
-/** A top-down semi (tractor + trailer) pointing north, as RGBA pixels at 2x. */
-function drawSemi(): ImageData {
-  const w = 48, h = 96
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const g = c.getContext('2d')!
-  const box = (x: number, y: number, bw: number, bh: number, r: number, fill: string, stroke: string, lw: number) => {
-    g.beginPath()
-    g.roundRect(x, y, bw, bh, r)
-    g.fillStyle = fill
-    g.fill()
-    g.lineWidth = lw
-    g.strokeStyle = stroke
-    g.stroke()
-  }
-  box(10, 34, 28, 58, 3, '#f8fafc', '#111827', 3.2) // trailer
-  box(12, 6, 24, 24, 6, '#1e3a8a', '#ffffff', 2.8) // cab
-  g.fillStyle = '#bfdbfe'
-  g.fillRect(16, 9, 16, 6) // windscreen
-  g.fillStyle = '#111827'
-  g.fillRect(21, 29, 6, 6) // fifth wheel
-  return g.getImageData(0, 0, w, h)
-}
+/** Draw order of the symbols, top first (a higher sort key draws on top). */
+const SORT: Partial<Record<SymbolId, number>> = { end: 7, start: 6, notravel: 5, rest: 4, 'rest-unknown': 4, break: 3, 'break-unknown': 3, severe: 2, high: 2 }
+const TWEEN_MS = 420
+const FOLLOW_ZOOM = 7.5
 
 const levelColor = (low: string) =>
   [
@@ -70,33 +68,51 @@ const levelColor = (low: string) =>
     UNKNOWN_COLOR,
   ] as unknown as string
 
+const esc = (x: string) => x.replace(/[<>&"]/g, (ch) => `&#${ch.charCodeAt(0)};`)
+
+interface MarkProps {
+  route: number
+  sym: SymbolId
+  sort: number
+  kind: 'start' | 'end' | 'stop' | 'hazard'
+  ref: number // stop index for stops, checkpoint index for hazards
+}
+
 interface Props {
   plan: Plan | null
   score: ScoreOut | null
   mode: WindMode
   selected: number
+  labels: [string, string]
   heatmapOn: boolean
+  checkpointsOn: boolean
+  follow: boolean
+  onFollow: (on: boolean) => void
   onSelect: (route: number) => void
+  onMode: (m: WindMode) => void
+  onHeatmap: (on: boolean) => void
+  onCheckpoints: (on: boolean) => void
   dark: boolean
 }
 
-export default function MapView({ plan, score, mode, selected, heatmapOn, onSelect, dark }: Props) {
+export default function MapView(props: Props) {
+  const { plan, score, mode, selected, heatmapOn, checkpointsOn, follow, onFollow, dark } = props
   const el = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
   // Bumped on every style load: switching light/dark replaces all layers, so every
   // effect below re-applies its data when this changes.
   const [ready, setReady] = useState(0)
   const [failed, setFailed] = useState(false)
+  const [layersOpen, setLayersOpen] = useState(false)
   const fitted = useRef<Plan | null>(null)
-  const [follow, setFollow] = useState(false)
-  const followRef = useRef(false)
-  followRef.current = follow
-  const live = useRef({ plan, score, mode, selected, onSelect, heatmapOn, dark })
-  live.current = { plan, score, mode, selected, onSelect, heatmapOn, dark }
+  const followEaseUntil = useRef(0)
+  const live = useRef(props)
+  live.current = props
 
   const heat = useMemo(() => (plan ? createHeatCanvas(plan.grid) : null), [plan])
   const heatHours = useMemo(() => (score ? decodeHours(score[mode].heatmap) : null), [score, mode])
   const segments = useMemo(() => (plan ? routeSegments(plan) : null), [plan])
+  const track = useMemo(() => (plan ? createTrack(plan, selected) : null), [plan, selected])
 
   // Create the map once.
   useEffect(() => {
@@ -126,84 +142,83 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
     map.touchZoomRotate.disableRotation()
 
-    // A top-down semi (tractor + trailer) pointing north; the layer rotates it to the route.
-    // The truck icon is drawn synchronously (no image loading to race the style), and
-    // re-added whenever a style switch clears it.
-    const addSemi = () => {
-      if (!map.hasImage('semi')) map.addImage('semi', drawSemi(), { pixelRatio: 2 })
+    // Symbols are drawn synchronously (nothing to race the style load) and re-added
+    // whenever a style switch clears them.
+    const addSymbol = (id: SymbolId) => {
+      if (!map.hasImage(id)) map.addImage(id, symbolImage(id, MAP_SIZES[id]), { pixelRatio: 2 })
     }
     map.on('styleimagemissing', (e) => {
-      if (e.id === 'semi') addSemi()
+      if ((ALL_SYMBOLS as string[]).includes(e.id)) addSymbol(e.id as SymbolId)
     })
 
     map.on('style.load', () => {
-      addSemi()
-      // Data goes under the first label layer so place names stay readable.
+      ALL_SYMBOLS.forEach(addSymbol)
+      const dk = live.current.dark
+      // Lines go under the first label layer so place names stay readable.
       const before = map.getStyle().layers.find((l) => l.type === 'symbol')?.id
-      map.addSource('routes', { type: 'geojson', data: EMPTY })
-      map.addSource('segments', { type: 'geojson', data: EMPTY })
-      map.addSource('checkpoints', { type: 'geojson', data: EMPTY })
-      map.addSource('truck', { type: 'geojson', data: EMPTY })
-      map.addSource('stops', { type: 'geojson', data: EMPTY })
-      map.addLayer(
-        {
-          id: 'route-casing',
-          type: 'line',
-          source: 'routes',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': live.current.dark ? '#0b0f17' : '#ffffff', 'line-width': 6, 'line-opacity': 0.9 },
-        },
-        before,
-      )
+      for (const id of ['routes', 'segments', 'checkpoints', 'marks', 'truck']) map.addSource(id, { type: 'geojson', data: EMPTY })
+      const round = { 'line-join': 'round', 'line-cap': 'round' } as const
+      const width = (z4: number, z8: number, z12: number) =>
+        ['interpolate', ['linear'], ['zoom'], 4, z4, 8, z8, 12, z12] as unknown as number
       map.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'routes',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#7c8797', 'line-width': 3, 'line-opacity': 0.7 },
-      })
+        id: 'other-casing', type: 'line', source: 'routes', layout: round,
+        paint: { 'line-color': dk ? '#0b0f17' : '#ffffff', 'line-width': width(5, 6, 7), 'line-opacity': 0.9 },
+      }, before)
       map.addLayer({
-        id: 'route-risk',
-        type: 'line',
-        source: 'segments',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        id: 'other-line', type: 'line', source: 'segments', layout: round,
+        paint: { 'line-color': dk ? OTHER_ROUTE_DARK : OTHER_ROUTE, 'line-width': width(3, 4, 5) },
+      }, before)
+      map.addLayer({
+        id: 'sel-casing', type: 'line', source: 'routes', layout: round,
+        paint: { 'line-color': dk ? '#f9fafb' : '#1f2937', 'line-width': width(8, 10, 12), 'line-opacity': dk ? 0.55 : 0.85 },
+      }, before)
+      map.addLayer({
+        id: 'sel-line', type: 'line', source: 'segments', layout: round,
         paint: {
-          'line-color': levelColor(live.current.dark ? '#60a5fa' : SELECTED_LOW),
-          'line-width': 3,
+          // The road already driven turns grey, like turn-by-turn apps' vanishing route line.
+          'line-color': ['case', ['boolean', ['feature-state', 'passed'], false], dk ? '#4b5563' : '#b8bec8', levelColor(dk ? LOW_DARK : LEVEL_COLORS[0])] as unknown as string,
+          'line-width': width(5, 7, 9),
         },
-      })
+      }, before)
       map.addLayer({
-        id: 'cp',
-        type: 'circle',
-        source: 'checkpoints',
+        id: 'sel-nt', type: 'line', source: 'segments', layout: { 'line-join': 'round' },
         paint: {
-          // Weather checkpoints: small white sample points, filled with the risk colour
-          // when risk is Moderate or worse, so they never look like route beads.
-          'circle-color': levelColor('#ffffff'),
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2.2, 7, 3.5, 11, 5.5],
-          'circle-stroke-color': live.current.dark ? '#cbd5e1' : '#334155',
-          'circle-stroke-width': 1,
+          'line-color': '#ffffff',
+          'line-width': width(1.5, 2, 2.5),
+          'line-dasharray': [2, 2],
+          'line-opacity': ['case', ['==', ['coalesce', ['feature-state', 'level'], -1], 4], 1, 0] as unknown as number,
         },
-      })
+      }, before)
+      // Invisible, wide hit area: hovering anywhere near a route shows the forecast there.
       map.addLayer({
-        id: 'stops',
-        type: 'circle',
-        source: 'stops',
-        filter: ['==', ['get', 'route'], -1],
+        id: 'hit', type: 'line', source: 'segments', layout: round,
+        paint: { 'line-color': '#000000', 'line-width': 18, 'line-opacity': 0 },
+      }, before)
+      map.addLayer({
+        id: 'cp', type: 'circle', source: 'checkpoints', minzoom: 7,
+        layout: { visibility: live.current.checkpointsOn ? 'visible' : 'none' },
         paint: {
-          'circle-radius': 6,
-          'circle-color': ['case', ['==', ['get', 'kind'], 'rest'], '#111827', '#ffffff'],
-          'circle-stroke-color': ['case', ['==', ['get', 'known'], 1], '#111827', '#b45309'],
-          'circle-stroke-width': 2.5,
+          'circle-color': ['case', ['boolean', ['feature-state', 'passed'], false], dk ? '#4b5563' : '#b8bec8', levelColor(dk ? LOW_DARK : LEVEL_COLORS[0])] as unknown as string,
+          'circle-radius': 4,
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 1.5,
         },
       })
       map.addLayer({
-        id: 'truck',
-        type: 'symbol',
-        source: 'truck',
+        id: 'marks', type: 'symbol', source: 'marks',
         layout: {
-          'icon-image': 'semi',
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.8, 8, 1.1],
+          'icon-image': ['get', 'sym'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.85, 10, 1.1],
+          'symbol-sort-key': ['get', 'sort'],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+        },
+      })
+      map.addLayer({
+        id: 'truck', type: 'symbol', source: 'truck',
+        layout: {
+          'icon-image': 'truck',
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.9, 8, 1.1],
           'icon-rotate': ['get', 'bearing'],
           'icon-rotation-alignment': 'map',
           'icon-allow-overlap': true,
@@ -213,65 +228,90 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       setReady((n) => n + 1)
     })
 
-    const popup = new Popup({ closeButton: false, closeOnClick: false, maxWidth: '260px', offset: 10 })
-    const showCheckpoint = (e: MapLayerMouseEvent) => {
-      const f = e.features?.[0]
+    const popup = new Popup({ closeButton: false, closeOnClick: false, maxWidth: '280px', offset: 12 })
+
+    const checkpointHtml = (i: number, title?: string) => {
       const { plan: p, score: s, mode: m } = live.current
-      if (!f || !p || f.id === undefined) return
-      map.getCanvas().style.cursor = 'pointer'
-      const i = Number(f.id) - 1
-      const props = p.checkpoints.features[i]?.properties
-      if (!props) return
+      const props = p?.checkpoints.features[i]?.properties
+      if (!p || !props) return ''
       const route = p.routes.features[props.route]?.properties
       const lvl = s ? levelAt(s[m].checkpoint_levels, i) : null
       const c = s?.conditions[i]
       const driver = s ? DRIVERS[s[m].checkpoint_drivers[i] ?? ''] : undefined
-      popup
-        .setLngLat(e.lngLat)
-        .setHTML(
-          `<div class="pop"><b>Route ${route?.name} · mile ${props.mile.toLocaleString('en-US')}</b>` +
-            `<div>ETA ${clock(props.eta, p.timezone)}</div>` +
-            (s
-              ? `<div class="pop-risk" style="--c:${lvl === null ? UNKNOWN_COLOR : LEVEL_COLORS[lvl]}">${lvl === null ? 'Unknown (no forecast)' : LEVELS[lvl]}${driver && lvl ? ` · ${driver}` : ''}</div>` +
-                `<div>Wind ${num(c?.wind, 0, 'mph')} · gusts ${num(c?.gust, 0, 'mph')}</div>` +
-                `<div>Rain ${num(c?.rain, 2, 'in/hr')} · snow ${num(c?.snow, 2, 'in/hr')}</div>`
-              : '<div>Loading weather…</div>') +
-            '</div>',
+      const sym = lvl !== null ? hazardSymbol(lvl) : null
+      return (
+        `<div class="pop"><div class="pop-head">${sym ? symbolSvg(sym, 18) : ''}<b>${esc(title ?? `Route ${route?.name}`)}</b></div>` +
+        `<div>Mile ${Math.round(props.mile).toLocaleString('en-US')} · truck there ${clock(props.eta, p.timezone)}</div>` +
+        (s
+          ? `<div class="pop-risk" style="--c:${lvl === null ? UNKNOWN_COLOR : LEVEL_COLORS[lvl]}">${lvl === null ? 'No forecast' : LEVELS[lvl]}${driver && lvl ? ` · ${driver}` : ''}</div>` +
+            `<div>Gusts ${num(c?.gust, 0, 'mph')} · wind ${num(c?.wind, 0, 'mph')}</div>` +
+            `<div>Rain ${num(c?.rain, 2, 'in/hr')} · snow ${num(c?.snow, 2, 'in/hr')}</div>`
+          : '<div>Loading weather…</div>') +
+        '</div>'
+      )
+    }
+
+    const markHtml = (f: MapGeoJSONFeature) => {
+      const { plan: p, labels } = live.current
+      if (!p) return ''
+      const m = f.properties as MarkProps
+      if (m.kind === 'hazard') return checkpointHtml(m.ref, SYMBOL_LABEL[m.sym])
+      const route = p.routes.features[m.route]?.properties
+      if (!route) return ''
+      if (m.kind === 'start' || m.kind === 'end') {
+        const at = m.kind === 'start' ? p.departure : p.departure + route.trip_s
+        return (
+          `<div class="pop"><div class="pop-head">${symbolSvg(m.sym, 18)}<b>${esc(labels[m.kind === 'start' ? 0 : 1] || SYMBOL_LABEL[m.sym])}</b></div>` +
+          `<div>${m.kind === 'start' ? 'Leave' : 'Arrive'} ${clock(at, p.timezone)}</div></div>`
         )
-        .addTo(map)
+      }
+      const st = route.stops[m.ref]
+      if (!st) return ''
+      return (
+        `<div class="pop"><div class="pop-head">${symbolSvg(m.sym, 18)}<b>${st.kind === 'rest' ? '10-hour rest' : '30-minute break'}</b></div>` +
+        (st.place
+          ? `<div>${esc(st.place.name)}${st.place.spaces ? ` · ${st.place.spaces} truck spaces` : ''}</div>`
+          : '<div class="warn-text">No known truck parking here; plan ahead</div>') +
+        `<div>Mile ${Math.round(st.mile).toLocaleString('en-US')} · ${clock(st.at, p.timezone)}</div>` +
+        '<div class="muted">Required by hours-of-service rules</div></div>'
+      )
+    }
+
+    const show = (e: MapLayerMouseEvent, html: string) => {
+      if (!html) return
+      map.getCanvas().style.cursor = 'pointer'
+      popup.setLngLat(e.lngLat).setHTML(html).addTo(map)
     }
     const hide = () => {
       map.getCanvas().style.cursor = ''
       popup.remove()
     }
-    for (const layer of ['cp', 'route-risk']) {
-      map.on('mousemove', layer, showCheckpoint)
-      map.on('mouseleave', layer, hide)
-    }
-    map.on('mousemove', 'stops', (e: MapLayerMouseEvent) => {
+    // Marks win over the line under them.
+    const onMark = (e: MapLayerMouseEvent) => {
       const f = e.features?.[0]
-      const p = live.current.plan
-      if (!f || !p) return
-      map.getCanvas().style.cursor = 'pointer'
-      const props = f.properties as { kind: string; mile: number; at: number; name: string; spaces: number; known: number }
-      const esc = (x: string) => x.replace(/[<>&"]/g, (ch) => `&#${ch.charCodeAt(0)};`)
-      popup
-        .setLngLat(e.lngLat)
-        .setHTML(
-          `<div class="pop"><b>${props.kind === 'rest' ? '10-hour rest' : '30-minute break'}</b>` +
-            (props.known
-              ? `<div>${esc(props.name)}${props.spaces > 0 ? ` · ${props.spaces} truck spaces` : ''}</div>`
-              : '<div class="warn-text">No known truck parking here; plan ahead</div>') +
-            `<div>Mile ${Math.round(props.mile).toLocaleString('en-US')} · ${clock(props.at, p.timezone)}</div>` +
-            '<div class="muted">Required by hours-of-service rules</div></div>',
-        )
-        .addTo(map)
+      if (f) show(e, markHtml(f))
+    }
+    const onLine = (e: MapLayerMouseEvent) => {
+      if (map.queryRenderedFeatures(e.point, { layers: ['marks'] }).length) return
+      const f = e.features?.[0]
+      if (f?.id !== undefined) show(e, checkpointHtml(Number(f.id) - 1))
+    }
+    map.on('mousemove', 'marks', onMark)
+    map.on('mousemove', 'hit', onLine)
+    map.on('mousemove', 'cp', onLine)
+    map.on('mouseleave', 'marks', hide)
+    map.on('mouseleave', 'hit', hide)
+    map.on('click', 'hit', (e) => {
+      // A grey route right under the pointer wins, even where it runs beside the selected one.
+      const { x, y } = e.point
+      const other = map.queryRenderedFeatures([[x - 5, y - 5], [x + 5, y + 5]], { layers: ['other-line'] })[0]
+      const r = other?.properties?.route
+      if (typeof r === 'number' && r !== live.current.selected) live.current.onSelect(r)
+      else onLine(e) // touch screens have no hover: a tap shows the forecast
     })
-    map.on('mouseleave', 'stops', hide)
-    map.on('click', 'route-risk', (e) => {
-      const r = e.features?.[0]?.properties?.route
-      if (typeof r === 'number') live.current.onSelect(r)
-    })
+    map.on('click', 'marks', onMark)
+    // Panning by hand means "let me look around": stop following the truck.
+    map.on('dragstart', () => live.current.follow && live.current.onFollow(false))
 
     return () => {
       popup.remove()
@@ -280,7 +320,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     }
   }, [])
 
-  // New plan: replace data and frame the routes.
+  // New plan: replace geometry and frame the routes.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
@@ -290,24 +330,6 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     src('segments').setData(segments ?? EMPTY)
     src('checkpoints').setData(plan?.checkpoints ?? EMPTY)
     src('truck').setData(EMPTY)
-    src('stops').setData({
-      type: 'FeatureCollection',
-      features: (plan?.routes.features ?? []).flatMap((r) =>
-        (r.properties.stops ?? []).map((st) => ({
-          type: 'Feature' as const,
-          geometry: { type: 'Point' as const, coordinates: st.place ? [st.place.lon, st.place.lat] : [st.lon, st.lat] },
-          properties: {
-            route: r.properties.id,
-            kind: st.kind,
-            mile: st.mile,
-            at: st.at,
-            name: st.place?.name ?? '',
-            spaces: st.place?.spaces ?? -1,
-            known: st.place ? 1 : 0,
-          },
-        })),
-      ),
-    })
     // A canvas source is bound to one canvas, so each plan gets a fresh source.
     if (map.getLayer('heat')) map.removeLayer('heat')
     if (map.getSource('heat')) map.removeSource('heat')
@@ -319,10 +341,10 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           type: 'raster',
           source: 'heat',
           layout: { visibility: live.current.heatmapOn ? 'visible' : 'none' },
-          // Softer at night: big bright areas are hard on dark-adapted eyes.
-          paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0, 'raster-opacity': live.current.dark ? 0.6 : 0.9 },
+          // A backdrop, not the main event: the route line has to stay the loudest thing.
+          paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0, 'raster-opacity': live.current.dark ? 0.35 : 0.45 },
         },
-        'route-casing',
+        'other-casing',
       )
     }
     if (plan && plan.routes.features.length && fitted.current !== plan) {
@@ -331,30 +353,45 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     }
   }, [plan, segments, heat, ready])
 
-  // Route selection: every route shows its risk; the selected one is thick and on top.
+  // Route selection: the selected route is drawn by the sel-* layers, the rest in grey.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    const routeSel = ['==', ['get', 'route'], selected]
-    const lowSel = live.current.dark ? '#60a5fa' : SELECTED_LOW
-    const lowOther = live.current.dark ? '#64748b' : '#8b95a5'
-    map.setPaintProperty('route-line', 'line-opacity', 0)
-    map.setPaintProperty('route-casing', 'line-width', ['case', ['==', ['get', 'id'], selected], 10, 5] as never)
-    map.setPaintProperty('route-risk', 'line-color', ['case', routeSel, levelColor(lowSel), levelColor(lowOther)] as never)
-    // Zoom must be the outermost expression, so the selection test goes inside each stop.
-    map.setPaintProperty('route-risk', 'line-width', [
-      'interpolate', ['linear'], ['zoom'],
-      3, ['case', routeSel, 4.5, 2.5],
-      8, ['case', routeSel, 6.5, 3.5],
-      12, ['case', routeSel, 8, 4],
-    ] as never)
-    map.setPaintProperty('route-risk', 'line-opacity', ['case', routeSel, 1, 0.75] as never)
-    map.setLayoutProperty('route-risk', 'line-sort-key', ['case', routeSel, 1, 0] as never)
-    map.setPaintProperty('cp', 'circle-opacity', ['case', routeSel, 1, 0.55] as never)
-    map.setPaintProperty('cp', 'circle-stroke-opacity', ['case', routeSel, 1, 0.55] as never)
-    map.setLayoutProperty('cp', 'circle-sort-key', ['case', routeSel, 1, 0] as never)
-    map.setFilter('stops', ['==', ['get', 'route'], selected])
+    const isSel = ['==', ['get', 'route'], selected]
+    const notSel = ['!=', ['get', 'route'], selected]
+    map.setFilter('other-casing', ['!=', ['get', 'id'], selected] as never)
+    map.setFilter('other-line', notSel as never)
+    map.setFilter('sel-casing', ['==', ['get', 'id'], selected] as never)
+    map.setFilter('sel-line', isSel as never)
+    map.setFilter('sel-nt', isSel as never)
+    map.setFilter('cp', isSel as never)
+    map.setFilter('marks', isSel as never)
   }, [selected, ready, plan])
+
+  // Start, destination, stops and hazard markers for every route (filtered to the selected one).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready) return
+    const features: Feature<Point, MarkProps>[] = []
+    const add = (coordinates: number[], p: Omit<MarkProps, 'sort'>) =>
+      features.push({ type: 'Feature', geometry: { type: 'Point', coordinates }, properties: { ...p, sort: SORT[p.sym] ?? 1 } })
+    for (const r of plan?.routes.features ?? []) {
+      const id = r.properties.id
+      const c = r.geometry.coordinates
+      add(c[0]!, { route: id, sym: 'start', kind: 'start', ref: 0 })
+      add(c[c.length - 1]!, { route: id, sym: 'end', kind: 'end', ref: 0 })
+      r.properties.stops.forEach((st, k) => {
+        const [lat, lon] = stopPoint(st)
+        add([lon, lat], { route: id, sym: stopSymbol(st.kind, !!st.place), kind: 'stop', ref: k })
+      })
+    }
+    if (plan && score) {
+      for (const h of hazards(plan, score, mode).features) {
+        add(h.geometry.coordinates, { route: h.properties.route, sym: h.properties.sym as SymbolId, kind: 'hazard', ref: h.properties.cp })
+      }
+    }
+    ;(map.getSource('marks') as GeoJSONSource).setData({ type: 'FeatureCollection', features })
+  }, [plan, score, mode, ready])
 
   // Checkpoint and segment colours for the current wind mode.
   useEffect(() => {
@@ -368,16 +405,50 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     }
   }, [plan, score, mode, ready])
 
-  // Heatmap and truck position follow the slider without React renders.
+  // Heatmap and truck follow the slider without React renders. The truck glides between
+  // hours instead of jumping, so playing the forecast looks like a drive.
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !ready || !plan) return
+    if (!map || !ready || !plan || !track) return
     let raf = 0
     let drawn = -1
+    let shown = plan.hours[hourStore.get()] ?? plan.departure
+    let from = shown
+    let target = shown
+    let startedAt = 0
+    let passed = new Set<number>()
+    const cps = plan.checkpoints.features.map((f, i) => ({ i, mile: f.properties.mile, route: f.properties.route })).filter((c) => c.route === track.route)
     const truckSrc = map.getSource('truck') as GeoJSONSource
     const heatSrc = map.getSource('heat') as CanvasSource | undefined
-    const apply = () => {
+
+    const place = (t: number) => {
+      const s = track.at(t)
+      truckSrc.setData({
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: s.pos }, properties: { bearing: s.bearing } }],
+      })
+      // Fade the road already driven (not once arrived: then the whole trip matters again).
+      const next = new Set<number>()
+      if (s.status === 'driving' || s.status === 'stopped') for (const c of cps) if (c.mile < s.mile - 1) next.add(c.i)
+      const mark = (i: number, v: boolean) => {
+        map.setFeatureState({ source: 'segments', id: i + 1 }, { passed: v })
+        map.setFeatureState({ source: 'checkpoints', id: i + 1 }, { passed: v })
+      }
+      for (const i of passed) if (!next.has(i)) mark(i, false)
+      for (const i of next) if (!passed.has(i)) mark(i, true)
+      passed = next
+      const f = live.current
+      if (f.follow && performance.now() > followEaseUntil.current) map.jumpTo({ center: s.pos })
+    }
+
+    const frame = (now: number) => {
       raf = 0
+      const k = Math.min(1, (now - startedAt) / TWEEN_MS)
+      shown = from + (target - from) * (k < 1 ? 1 - (1 - k) * (1 - k) : 1)
+      place(shown)
+      if (k < 1) raf = requestAnimationFrame(frame)
+    }
+    const onHour = () => {
       const h = hourStore.get()
       if (heat && heatHours && h !== drawn) {
         const values = heatHours[h]
@@ -389,27 +460,39 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           requestAnimationFrame(() => heatSrc?.pause())
         }
       }
-      const truck = truckAt(plan, live.current.selected, plan.hours[h] ?? 0)
-      truckSrc.setData(truck)
-      const pos = truck.features[0]?.geometry.coordinates as [number, number] | undefined
-      if (followRef.current && pos) map.easeTo({ center: pos, duration: 350 })
+      from = shown
+      target = plan.hours[h] ?? plan.departure
+      startedAt = performance.now()
+      if (!raf) raf = requestAnimationFrame(frame)
     }
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(apply)
-    }
-    apply()
-    const unsub = hourStore.subscribe(schedule)
+    place(shown)
+    onHour()
+    const unsub = hourStore.subscribe(onHour)
     return () => {
       unsub()
       cancelAnimationFrame(raf)
+      for (const i of passed) {
+        map.setFeatureState({ source: 'segments', id: i + 1 }, { passed: false })
+        map.setFeatureState({ source: 'checkpoints', id: i + 1 }, { passed: false })
+      }
     }
-  }, [plan, heat, heatHours, ready, selected, follow])
+  }, [plan, track, heat, heatHours, ready])
+
+  // Turning Follow on flies to the truck first, then keeps it centred.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !ready || !follow || !track || !plan) return
+    const s = track.at(plan.hours[hourStore.get()] ?? plan.departure)
+    followEaseUntil.current = performance.now() + 700
+    map.easeTo({ center: s.pos, zoom: Math.max(map.getZoom(), FOLLOW_ZOOM), duration: 650 })
+  }, [follow, ready, track, plan])
 
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
     if (map.getLayer('heat')) map.setLayoutProperty('heat', 'visibility', heatmapOn ? 'visible' : 'none')
-  }, [heatmapOn, ready, heat])
+    map.setLayoutProperty('cp', 'visibility', checkpointsOn ? 'visible' : 'none')
+  }, [heatmapOn, checkpointsOn, ready, heat])
 
   // Light/dark: swap the basemap; 'style.load' then rebuilds our layers.
   useEffect(() => {
@@ -421,7 +504,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
   if (failed) {
     return (
       <div className="map map-failed" role="img" aria-label="Map unavailable">
-        <p>This browser cannot show the map (WebGL 2 is unavailable). The route table still works.</p>
+        <p>This browser cannot show the map (WebGL 2 is unavailable). The route cards and itinerary still work.</p>
       </div>
     )
   }
@@ -433,16 +516,51 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           <button
             type="button"
             onClick={() => {
-              setFollow(false)
+              onFollow(false)
               if (mapRef.current) fitRoutes(mapRef.current, plan)
             }}
-            title="Show the whole trip"
+            title="Zoom out to the whole route" aria-label="Whole route"
           >
-            Whole trip
+            <svg viewBox="0 0 20 20" aria-hidden><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" /></svg>
+            <span>Whole route</span>
           </button>
-          <button type="button" className={follow ? 'on' : undefined} aria-pressed={follow} onClick={() => setFollow((f) => !f)} title="Keep the truck in view as the time changes">
-            Follow truck
+          <button
+            type="button"
+            className={follow ? 'on' : undefined}
+            aria-pressed={follow}
+            onClick={() => onFollow(!follow)}
+            title="Keep the truck in the middle of the map as time moves (dragging the map turns this off)" aria-label="Follow truck"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden><circle cx="10" cy="10" r="3.2" /><path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3" /></svg>
+            <span>Follow truck</span>
           </button>
+          <div className="layers">
+            <button type="button" aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)} title="Map layers and wind setting" aria-label="Layers">
+              <svg viewBox="0 0 20 20" aria-hidden><path d="M10 2.5 18 7l-8 4.5L2 7z" /><path d="m2 11 8 4.5 8-4.5" /></svg>
+              <span>Layers</span>
+            </button>
+            {layersOpen && (
+              <div className="layers-pop" role="group" aria-label="Map layers">
+                <label className="check">
+                  <input type="checkbox" checked={heatmapOn} onChange={(e) => props.onHeatmap(e.target.checked)} />
+                  Weather heatmap
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={checkpointsOn} onChange={(e) => props.onCheckpoints(e.target.checked)} />
+                  Checkpoint dots (zoomed in)
+                </label>
+                <div className="layers-label">Rate wind on</div>
+                <div className="seg small" role="radiogroup" aria-label="Wind value used for risk">
+                  <button type="button" role="radio" aria-checked={mode === 'gust'} className={mode === 'gust' ? 'on' : undefined} onClick={() => props.onMode('gust')} title="Gusts are what push trucks over (default)">
+                    Gusts
+                  </button>
+                  <button type="button" role="radio" aria-checked={mode === 'sustained'} className={mode === 'sustained' ? 'on' : undefined} onClick={() => props.onMode('sustained')} title="Rate wind on sustained speed instead">
+                    Sustained
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </>
@@ -456,35 +574,5 @@ function fitRoutes(map: MlMap, plan: Plan) {
       w = Math.min(w, x!); e = Math.max(e, x!); s = Math.min(s, y!); n = Math.max(n, y!)
     }
   const wide = window.innerWidth >= 900
-  map.fitBounds([[w, s], [e, n]], { padding: wide ? { top: 70, bottom: 160, left: 60, right: 60 } : 30, duration: 600 })
-}
-
-/** Where the truck is on the selected route at `t` (interpolated between checkpoints). */
-function truckAt(plan: Plan, route: number, t: number): FeatureCollection<Point> {
-  const cps = plan.checkpoints.features.filter((f) => f.properties.route === route)
-  if (!cps.length || t < plan.departure) return { type: 'FeatureCollection', features: [] }
-  let pos = cps[cps.length - 1]!.geometry.coordinates
-  let bearing = 0
-  for (let k = 1; k < cps.length; k++) {
-    const a = cps[k - 1]!
-    const b = cps[k]!
-    const [ax, ay] = a.geometry.coordinates as [number, number]
-    const [bx, by] = b.geometry.coordinates as [number, number]
-    bearing = bearingDeg(ay, ax, by, bx)
-    if (t <= b.properties.eta) {
-      const span = b.properties.eta - a.properties.eta || 1
-      const f = Math.max(0, Math.min(1, (t - a.properties.eta) / span))
-      pos = [ax + (bx - ax) * f, ay + (by - ay) * f]
-      break
-    }
-  }
-  const feature: Feature<Point> = { type: 'Feature', geometry: { type: 'Point', coordinates: pos }, properties: { bearing } }
-  return { type: 'FeatureCollection', features: [feature] }
-}
-
-function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const r = Math.PI / 180
-  const y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r)
-  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r)
-  return (Math.atan2(y, x) / r + 360) % 360
+  map.fitBounds([[w, s], [e, n]], { padding: wide ? { top: 80, bottom: 190, left: 60, right: 150 } : 30, duration: 600 })
 }

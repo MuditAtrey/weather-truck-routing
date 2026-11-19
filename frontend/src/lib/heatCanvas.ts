@@ -8,7 +8,7 @@
 // The expensive part (which cells and weights feed each pixel) is computed once per
 // plan; each hour is then a single pass over typed arrays (~1-3 ms).
 import type { FeatureCollection, Polygon } from 'geojson'
-import { LEVEL_COLORS, UNKNOWN_COLOR } from './risk'
+import { HEAT_COLORS, UNKNOWN_COLOR } from './risk'
 
 const MAX_W = 420
 const UNKNOWN = 255
@@ -20,7 +20,7 @@ function hexRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16)
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
-const STOPS = LEVEL_COLORS.map(hexRgb)
+const STOPS = HEAT_COLORS.map(hexRgb)
 const GREY = hexRgb(UNKNOWN_COLOR)
 
 /** Colour for a severity in 0..4, with alpha that keeps Low nearly invisible. */

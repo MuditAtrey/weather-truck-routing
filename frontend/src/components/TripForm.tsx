@@ -191,21 +191,26 @@ export default function TripForm({ busy, onSubmit, onCancel, onPrefetch, folded 
           </div>
         </div>
       </div>
-      <div className="row">
-        <fieldset className="field seg">
-          <legend>Check weather every</legend>
-          {([10, 25, 50] as const).map((v) => (
-            <label key={v} className={interval === v ? 'on' : undefined}>
-              <input type="radio" name="interval" checked={interval === v} onChange={() => setIntervalMi(v)} />
-              {v} mi
-            </label>
-          ))}
-        </fieldset>
-        <label className="check" title="Adds the 30-minute break after 8 hours and 10-hour rest after 11 hours of driving">
-          <input type="checkbox" checked={hos} onChange={(e) => setHos(e.target.checked)} />
-          Driver rest stops (HOS)
-        </label>
-      </div>
+      <details className="more-options">
+        <summary>
+          More options <span className="muted">· weather every {interval} mi, rest stops {hos ? 'on' : 'off'}</span>
+        </summary>
+        <div className="row">
+          <fieldset className="field seg">
+            <legend>Check weather every</legend>
+            {([10, 25, 50] as const).map((v) => (
+              <label key={v} className={interval === v ? 'on' : undefined}>
+                <input type="radio" name="interval" checked={interval === v} onChange={() => setIntervalMi(v)} />
+                {v} mi
+              </label>
+            ))}
+          </fieldset>
+          <label className="check" title="Adds the 30-minute break after 8 hours and 10-hour rest after 11 hours of driving">
+            <input type="checkbox" checked={hos} onChange={(e) => setHos(e.target.checked)} />
+            Driver rest stops (HOS)
+          </label>
+        </div>
+      </details>
       {error && (
         <p className="form-error" role="alert">
           {error}

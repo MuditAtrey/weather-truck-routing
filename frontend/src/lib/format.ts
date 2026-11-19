@@ -32,7 +32,7 @@ export function duration(seconds: number): string {
 export const miles = (mi: number) => `${Math.round(mi).toLocaleString('en-US')} mi`
 
 export function num(v: number | null | undefined, digits: number, unit: string): string {
-  return v === null || v === undefined ? '—' : `${v.toFixed(digits)} ${unit}`
+  return v === null || v === undefined ? 'n/a' : `${v.toFixed(digits)} ${unit}`
 }
 
 /** Current wall-clock time in a zone, shaped for <input type="datetime-local">. */

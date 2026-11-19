@@ -1,6 +1,6 @@
 # Weather-aware truck routing
 
-Plan a truck trip and get three routes, each scored on forecast wind, rain and snow at the time the truck will actually be at each point. The app recommends the safest route, shows why the others lost, and plays the next 48 hours of weather along the corridor.
+Plan a truck trip and get three routes, each scored on forecast gusts, rain and snow at the time the truck will actually be at each point. The app recommends the safest route, says why the others lost, places the driver's required rest stops at real truck stops, and plays the trip hour by hour with the weather along the corridor.
 
 **Live app:** https://weather-truck-routing-vert.vercel.app
 **Walkthrough (Loom):** _link to be added_
@@ -11,10 +11,13 @@ Stack: React 19 + TypeScript + MapLibre GL (Vite) on the front end, Django 6 + D
 ## What it does
 
 1. **Three routes.** Trips under 1,500 km use Valhalla's truck profile with the load's weight. Longer trips are truck-routed in legs (see [Routing](#routing)). If fewer than three distinct routes come back, the gap is filled by routing through a point pushed sideways from the straight line.
-2. **Weather where the truck will be, when it will be there.** Checkpoints every 10, 25 or 50 miles (your choice) get the forecast for the truck's arrival time, including US hours-of-service breaks (on by default).
+2. **Weather where the truck will be, when it will be there.** Checkpoints every 10, 25 or 50 miles (your choice) get the forecast for the truck's arrival time, including US hours-of-service breaks (on by default). Departures can be up to 7 days ahead.
 3. **Risk per checkpoint**, using the brief's thresholds and load rules exactly. The worst of wind, rain and snow sets the level.
 4. **A recommendation** using the brief's order: fewest Severe miles, then fewest High miles, then lowest average risk, then shortest time. Each route gets one line explaining the deciding criterion.
-5. **A map** with all three routes, the selected route coloured by risk, checkpoint popups (ETA, wind, gusts, rain, snow, what drove the level), a truck that follows the slider, required rest stops and a smooth weather heatmap with a 0 to 48 hour slider and play button.
+5. **Rest stops at real places.** The 30-minute break and 10-hour rest go to the latest truck stop or rest area before the legal limit (4,687 sites from OpenStreetMap and U.S. DOT data), not to wherever the clock runs out. Stops with no known parking nearby are flagged.
+6. **A map** with all three routes. The selected one is coloured by risk with a dark outline; the others are grey. One warning sign marks the worst point of each High, Severe or No Travel stretch (No Travel stretches are also dashed), and hovering anywhere on a route shows that place's forecast. Start, destination, breaks and rests use the same symbols on the map, the timeline, the itinerary and the key.
+7. **A trip timeline.** Drag or play it and a truck drives the route on the road itself, standing still during breaks and rests, with the road behind it greyed out. A strip under the slider shows the risk the truck meets each hour, and the readout names where it is ("Driving, mile 412 near Rawlins, WY · gusts 38 mph"). The slider covers the 48 hours the brief asks for, or the whole trip when it is longer. The map follows the truck while playing; dragging the map stops following and "Whole route" zooms back out. The weather heatmap, checkpoint dots and the gusts/sustained setting are under Layers.
+8. **Send to the driver.** Per-leg links that open Google Maps, Apple Maps or Waze from one stop to the next, whole-trip links (Apple keeps all stops; Google a day at a time, 9 stops per link), a GPX file with the exact route and stops (validated against the GPX 1.1 schema), and a plain-text itinerary to copy. Each link format was checked in a browser for what it really opens.
 
 ## How it works
 
@@ -37,7 +40,7 @@ map + cards
 ### Routing
 
 - **Valhalla (FOSSGIS public server), truck costing**, with gross weight = cargo + 34,000 lb tare, in tonnes, and a 65 mph top speed. A weight the server would silently clamp is treated as an error.
-- **Long trips (over 1,500 km straight line)** exceed what the public server accepts in one request. OSRM sketches three corridors; each is cut into legs of about 650 road miles at the straightest nearby stretch of road; every leg is truck-routed with arrival and departure headings; the legs are stitched together. If a forced join makes the truck drive out to a point and straight back, that spur is cut out along with its time. Seattle to Washington DC: 5 legs per route, about 20 s the first time and under 3 s once cached.
+- **Long trips (over 1,500 km straight line)** exceed what the public server accepts in one request. OSRM sketches three corridors; each is cut into legs of about 780 road miles at the straightest nearby stretch of road; every leg is truck-routed with arrival and departure headings; the legs are stitched together. If a forced join makes the truck drive out to a point and straight back, that spur is cut out along with its time. Seattle to Washington DC: 5 legs per route, about 20 s the first time and under 3 s once cached.
 - **Fallback.** Valhalla gets a 2.5 s head start; if it is slow, OSRM is asked in parallel and the first good answer wins. If Valhalla is down or a leg fails, the plan uses OSRM (car roads, truck speed capped at 65 mph) and the UI says so. "No road between these points" (an island, a lake) is a final answer, not a reason to fall back.
 - **Routes into Canada** (Detroit to Buffalo goes through Ontario) are flagged and ranked after US-only routes, since a domestic load would need a border crossing.
 
@@ -76,8 +79,9 @@ The load rules make heavier trucks riskier in wind, as the brief says. In practi
 Headless Chromium on an Apple M4:
 
 - **Heatmap slider:** stepping through all 49 hours, one per frame, takes the same time per frame as an idle page (20 ms per two frames; worst frame 21 ms). The hour lives outside React; each change redraws one small canvas.
+- **Playback:** the truck glides between hours (about 35 position updates in 4 s of play in both Chromium and Firefox), stays on the drawn road in every sample, and only changed segments get new map state.
 - **Plans:** Dallas to Denver about 2 s; Detroit to Buffalo planned, forecast and scored in about 2 to 3 s; Seattle to Washington DC (truck legs) about 20 s the first time, under 3 s cached.
-- **Bundle (gzip):** app 79 KB; the map (MapLibre) loads separately at about 300 KB, in parallel with the form.
+- **Bundle (gzip):** app 88 KB; the map (MapLibre) loads separately at about 300 KB, in parallel with the form.
 
 ## Running it locally
 
@@ -93,6 +97,8 @@ cd frontend && npm ci && npm run dev
 
 Open http://localhost:5173 (Vite proxies `/api` to Django).
 
+Without a weather quota on your network, `API_TARGET=https://weather-truck-routing-vert.vercel.app npm run dev` points the dev server at the deployed API instead.
+
 Checks:
 
 ```bash
@@ -100,7 +106,7 @@ cd backend && uv run pytest && uv run ruff check . && uv run mypy planner config
 ```
 
 ```bash
-cd frontend && npm run typecheck && npm run build
+cd frontend && npm run typecheck && npm test && npm run build
 ```
 
 After changing an API schema: `uv run python manage.py export_openapi` (backend), then `npm run gen:api` (frontend) regenerates the TypeScript types.
@@ -115,11 +121,14 @@ backend/planner/
   services.py    the two use cases: plan and score
   api.py         Django Ninja endpoints and error mapping
   schemas.py     request and response models (source of the OpenAPI spec)
-backend/tests/   115 tests; recorded router responses, no network
+  data/          truck stops and rest areas (built by scripts/truck_stops/build.py)
+backend/tests/   128 tests; recorded router responses, no network
 frontend/src/
   api/           typed client; schema.d.ts is generated from the OpenAPI spec
-  lib/           weather download, heatmap canvas, route segments, formatting
-  components/    form, place search, route cards, map, timeline, legend
+  lib/           weather download, heatmap canvas, route segments, truck position
+                 along the road, hazard markers, shared symbols, exports, verdicts
+  components/    form, place search, route cards, itinerary, map, timeline, key
+  test/          29 tests (exports, truck position, hazards, verdicts, weather)
 ```
 
 Django Ninja rather than Django REST Framework: the plan endpoint makes several outbound calls, Ninja runs them natively async, and its Pydantic schemas generate the OpenAPI spec the frontend's types come from. I know Spotter uses DRF; the domain and provider code would move over unchanged.

@@ -1,8 +1,14 @@
-// Risk levels, labels and colours shared by the map, legend and route cards.
-// Palette: ColorBrewer YlOrRd steps (colour-blind safe), with Low kept neutral so
-// that only real risk draws the eye. No Travel also gets a non-colour cue (ring).
+// Risk levels, labels and colours shared by the map, key, timeline and route cards.
+// Low is blue everywhere (grey only ever means "another route"); Moderate to No Travel
+// are ColorBrewer YlOrRd steps (colour-blind safe), and High and above also get a shape
+// (diamond, octagon) so no level relies on colour alone.
 export const LEVELS = ['Low', 'Moderate', 'High', 'Severe', 'No Travel'] as const
-export const LEVEL_COLORS = ['#94a3b8', '#fdb84d', '#f4732a', '#d7191c', '#5c0517'] as const
+export const LEVEL_COLORS = ['#2563eb', '#fdb84d', '#f4732a', '#d7191c', '#5c0517'] as const
+export const LOW_DARK = '#3b82f6'
+export const OTHER_ROUTE = '#8b95a5'
+export const OTHER_ROUTE_DARK = '#64748b'
+/** Heatmap ramp: starts transparent amber so calm areas stay clear of colour. */
+export const HEAT_COLORS = ['#fdb84d', '#fdb84d', '#f4732a', '#d7191c', '#5c0517'] as const
 export const UNKNOWN_COLOR = '#c4c9d1'
 
 export const THRESHOLDS = {
