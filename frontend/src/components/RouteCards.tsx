@@ -9,6 +9,8 @@ interface Props {
   score: ScoreOut | null
   mode: WindMode
   result: ModeResult | null
+  /** Weather could not be fetched: say so instead of showing a loading bar forever. */
+  weatherFailed?: boolean
   selected: number
   onSelect: (id: number) => void
 }
@@ -41,7 +43,7 @@ function VerdictLine({ plan, score, mode, routeId }: { plan: Plan; score: ScoreO
   )
 }
 
-export default function RouteCards({ plan, score, mode, result, selected, onSelect }: Props) {
+export default function RouteCards({ plan, score, mode, result, weatherFailed, selected, onSelect }: Props) {
   const routes = plan.routes.features.map((f) => f.properties)
   const order = result?.ranking.order ?? routes.map((r) => r.id)
   return (
@@ -110,7 +112,11 @@ export default function RouteCards({ plan, score, mode, result, selected, onSele
                   {reason && <p className="reason">{reason}</p>}
                 </>
               ) : (
-                <div className="bar loading" aria-hidden />
+                weatherFailed ? (
+                  <p className="reason">No forecast yet, so this route is not rated. Try again in a minute.</p>
+                ) : (
+                  <div className="bar loading" aria-hidden />
+                )
               )}
             </button>
           </li>

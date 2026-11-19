@@ -303,7 +303,8 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
           type: 'raster',
           source: 'heat',
           layout: { visibility: live.current.heatmapOn ? 'visible' : 'none' },
-          paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0, 'raster-opacity': 0.9 },
+          // Softer at night: big bright areas are hard on dark-adapted eyes.
+          paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0, 'raster-opacity': live.current.dark ? 0.6 : 0.9 },
         },
         'route-casing',
       )

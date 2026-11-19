@@ -279,7 +279,15 @@ export default function App() {
                   This network’s weather quota is used up, so the server downloaded the forecasts instead.
                 </p>
               )}
-              <RouteCards plan={plan} score={score} mode={mode} result={result} selected={selected} onSelect={setSelected} />
+              <RouteCards
+                plan={plan}
+                score={score}
+                mode={mode}
+                result={result}
+                weatherFailed={phase.kind === 'error' && phase.stage === 'weather'}
+                selected={selected}
+                onSelect={setSelected}
+              />
               <ExportBar plan={plan} selected={selected} labels={labels} />
               <p className="footnote muted">
                 Risk is rated at each checkpoint, at the truck’s estimated arrival time, and each checkpoint counts for

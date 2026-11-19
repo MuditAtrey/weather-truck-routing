@@ -3,6 +3,7 @@
 // impact levels), without borrowing official NWS warning names.
 import type { ModeResult, Plan, ScoreOut } from '../api/client'
 import { clock } from './format'
+import { STATE_ABBR } from './geocode'
 import { levelAt, type WindMode } from './risk'
 
 export interface Verdict {
@@ -65,14 +66,16 @@ export function nearestPlace(point: [number, number]): Promise<string> {
   const key = `${point[0].toFixed(2)},${point[1].toFixed(2)}`
   let p = placeCache.get(key)
   if (!p) {
-    const params = new URLSearchParams({ lat: point[0].toFixed(4), lon: point[1].toFixed(4), lang: 'en', layer: 'city' })
+    // No layer filter: on a highway the nearest object is a road, which carries its town.
+    const params = new URLSearchParams({ lat: point[0].toFixed(4), lon: point[1].toFixed(4), lang: 'en' })
     p = fetch(`https://photon.komoot.io/reverse?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const props = d?.features?.[0]?.properties
         if (!props) return ''
-        const town = props.name ?? props.city ?? props.county
-        return town ? `near ${town}${props.state ? `, ${props.state}` : ''}` : ''
+        const town = props.city ?? props.county ?? (props.type === 'city' ? props.name : undefined)
+        const state = props.state ? (STATE_ABBR[props.state] ?? props.state) : ''
+        return town ? `near ${town}${state ? `, ${state}` : ''}` : ''
       })
       .catch(() => '')
     placeCache.set(key, p)

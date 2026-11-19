@@ -69,8 +69,12 @@ function corridor(route: RouteFeature, fromMi: number, toMi: number, n: number):
   return out
 }
 
-function googleUrl(origin: [number, number], destination: [number, number], waypoints: [number, number][]): string {
-  const params = new URLSearchParams({ api: '1', origin: ll(origin), destination: ll(destination), travelmode: 'driving' })
+type End = [number, number] | string // a point, or the place name the user picked
+
+const endText = (e: End) => (typeof e === 'string' ? e : ll(e))
+
+function googleUrl(origin: End, destination: End, waypoints: [number, number][]): string {
+  const params = new URLSearchParams({ api: '1', origin: endText(origin), destination: endText(destination), travelmode: 'driving' })
   if (waypoints.length) params.set('waypoints', waypoints.map(ll).join('|'))
   return `https://www.google.com/maps/dir/?${params}`
 }
@@ -81,7 +85,7 @@ export interface DayLink {
 }
 
 /** One Google Maps link per driving day (start or rest to the next rest or destination). */
-export function googleDayLinks(route: RouteFeature): DayLink[] {
+export function googleDayLinks(route: RouteFeature, labels?: [string, string]): DayLink[] {
   const { start, end } = endpoints(route)
   const stops = stopsOf(route)
   const rests = stops.filter((s) => s.kind === 'rest')
@@ -101,19 +105,29 @@ export function googleDayLinks(route: RouteFeature): DayLink[] {
     const via = [...breaks, ...fill].sort((x, y) => x.mile - y.mile).map((w) => w.p)
     days.push({
       label: bounds.length > 2 ? `Day ${d + 1}: ${a.label === 'start' ? 'start' : a.label} to ${b.label}` : 'Whole trip',
-      url: googleUrl(a.p, b.p, via),
+      url: googleUrl(
+        d === 0 && labels ? labels[0] : a.p,
+        d + 2 === bounds.length && labels ? labels[1] : b.p,
+        via,
+      ),
     })
   }
   return days
 }
 
 /** One Apple Maps link for the whole trip: every stop, plus route points to hold the corridor. */
-export function appleTripUrl(route: RouteFeature, maxStops = 15): string {
+export function appleTripUrl(route: RouteFeature, labels?: [string, string], maxStops = 15): string {
   const { start, end } = endpoints(route)
   const stops = stopsOf(route).map((s) => ({ mile: s.mile, p: stopPoint(s) }))
   const fill = corridor(route, 0, route.properties.distance_mi, Math.max(0, Math.min(6, maxStops - stops.length)))
   const via = [...stops, ...fill].sort((a, b) => a.mile - b.mile).slice(0, maxStops)
-  const q = [`source=${ll(start)}`, `destination=${ll(end)}`, ...via.map((w) => `waypoint=${ll(w.p)}`), 'mode=driving']
+  const enc = (e: End) => encodeURIComponent(endText(e))
+  const q = [
+    `source=${enc(labels ? labels[0] : start)}`,
+    `destination=${enc(labels ? labels[1] : end)}`,
+    ...via.map((w) => `waypoint=${ll(w.p)}`),
+    'mode=driving',
+  ]
   return `https://maps.apple.com/directions?${q.join('&')}`
 }
 

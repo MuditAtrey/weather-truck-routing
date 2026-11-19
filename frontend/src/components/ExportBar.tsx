@@ -28,7 +28,7 @@ export default function ExportBar({ plan, selected, labels }: Props) {
   if (!route) return null
   const stops = stopsOf(route)
   const legList = legs(route, labels)
-  const days = googleDayLinks(route)
+  const days = googleDayLinks(route, labels)
   const t = (s: number) => clock(s, plan.timezone)
 
   const copy = async () => {
@@ -103,7 +103,7 @@ export default function ExportBar({ plan, selected, labels }: Props) {
       <div className="export-actions">
         <button type="button" className="ghost" onClick={copy}>{copied ? 'Copied' : 'Copy itinerary'}</button>
         <button type="button" className="ghost" onClick={() => downloadGpx(plan, route, labels)}>Download GPX</button>
-        <a className="ghost" href={appleTripUrl(route)} target="_blank" rel="noreferrer">Whole trip in Apple Maps</a>
+        <a className="ghost" href={appleTripUrl(route, labels)} target="_blank" rel="noreferrer">Whole trip in Apple Maps</a>
       </div>
       <div className="day-links">
         {days.map((d) => (
