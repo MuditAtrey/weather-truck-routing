@@ -30,16 +30,30 @@ def gross_tonnes(cargo_lb: int) -> float:
     return round((cargo_lb + TRUCK_TARE_LB) / LB_PER_TONNE, 3)
 
 
-def build_request(points: list[LatLon], cargo_lb: int, alternates: int) -> dict[str, object]:
+def build_request(
+    points: list[LatLon],
+    cargo_lb: int,
+    alternates: int,
+    headings: list[float | None] | None = None,
+) -> dict[str, object]:
+    locations: list[dict[str, object]] = []
+    for i, (lat, lon) in enumerate(points):
+        loc: dict[str, object] = {
+            "lat": round(lat, 6),
+            "lon": round(lon, 6),
+            "type": "break" if i in (0, len(points) - 1) else "through",
+        }
+        heading = headings[i] if headings else None
+        if heading is not None:
+            # Arrive and leave in the direction of travel, so legs join without U-turns.
+            loc["heading"] = round(heading)
+            loc["heading_tolerance"] = 45
+            # A join point must sit on the highway itself, not a ramp or frontage road
+            # beside it, or the truck exits and loops back to reach it.
+            loc["search_filter"] = {"min_road_class": "primary", "exclude_ramp": True}
+        locations.append(loc)
     return {
-        "locations": [
-            {
-                "lat": round(lat, 6),
-                "lon": round(lon, 6),
-                "type": "break" if i in (0, len(points) - 1) else "through",
-            }
-            for i, (lat, lon) in enumerate(points)
-        ],
+        "locations": locations,
         "costing": "truck",
         "costing_options": {
             "truck": {
@@ -88,11 +102,17 @@ def parse(data: dict[str, object]) -> list[Route]:
 ERROR_KINDS = {154: "too_far", 170: "no_route", 171: "not_on_road", 442: "no_route"}
 
 
-async def fetch(points: list[LatLon], cargo_lb: int, alternates: int = 2) -> list[Route]:
+async def fetch(
+    points: list[LatLon],
+    cargo_lb: int,
+    alternates: int = 2,
+    headings: list[float | None] | None = None,
+) -> list[Route]:
     await gate.wait()
     try:
         resp = await client().post(
-            f"{settings.VALHALLA_URL}/route", json=build_request(points, cargo_lb, alternates)
+            f"{settings.VALHALLA_URL}/route",
+            json=build_request(points, cargo_lb, alternates, headings),
         )
     except httpx.HTTPError as exc:
         raise RoutingError("unavailable", "valhalla", type(exc).__name__) from exc

@@ -193,6 +193,7 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
             "provider": result.provider,
             "profile": "truck" if result.provider == "valhalla" else "car_capped",
             "fallback_reason": result.fallback_reason,
+            "legs": result.legs,
         },
         "warnings": result.warnings,
         "routes": {"type": "FeatureCollection", "features": route_features},

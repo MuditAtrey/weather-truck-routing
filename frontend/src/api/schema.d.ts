@@ -140,6 +140,12 @@ export interface components {
             profile: "truck" | "car_capped";
             /** Fallback Reason */
             fallback_reason: string | null;
+            /**
+             * Legs
+             * @description Valhalla requests stitched into each route
+             * @default 1
+             */
+            legs: number;
         };
         /** WeatherPoint */
         WeatherPoint: {

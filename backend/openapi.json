@@ -278,6 +278,12 @@
               }
             ],
             "title": "Fallback Reason"
+          },
+          "legs": {
+            "default": 1,
+            "description": "Valhalla requests stitched into each route",
+            "title": "Legs",
+            "type": "integer"
           }
         },
         "required": [

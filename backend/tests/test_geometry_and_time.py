@@ -162,3 +162,39 @@ def test_canada_outline() -> None:
     assert not in_canada((47.6, -122.3))  # Seattle
     assert crosses_canada([(42.33, -83.05), (42.98, -81.25), (42.89, -78.88)], step=1)
     assert not crosses_canada([(42.33, -83.05), (41.5, -81.7), (42.89, -78.88)], step=1)
+
+
+def test_join_carries_distance_and_time_across_legs() -> None:
+    from planner.domain.route import join
+
+    a = from_segment_durations([(0.0, 0.0), (1 / 69.0934, 0.0)], [60.0], 60.0)
+    b = from_segment_durations([(1 / 69.0934, 0.0), (2 / 69.0934, 0.0)], [90.0], 90.0)
+    j = join([a, b], "valhalla")
+    assert len(j.coords) == 3  # shared joint not duplicated
+    assert j.distance_mi == pytest.approx(2.0, rel=1e-3)
+    assert j.drive_s == pytest.approx(150)
+
+
+def test_bearing() -> None:
+    from planner.domain.geo import bearing_deg
+
+    assert bearing_deg((40, -100), (41, -100)) == pytest.approx(0, abs=0.1)
+    assert bearing_deg((40, -100), (40, -99)) == pytest.approx(90, abs=0.5)
+
+
+def test_join_removes_an_out_and_back_spur_at_the_joint() -> None:
+    from planner.domain.route import join
+
+    step = 1 / 69.0934  # one mile of latitude
+    # Leg 1 drives north 10 miles, then 3 miles down a side road (east) to the cut point.
+    north = [(k * step, 0.0) for k in range(11)]
+    side = [(10 * step, k * step * 1.3) for k in range(1, 4)]
+    leg1 = from_segment_durations(north + side, [60.0] * 13, 780.0)
+    # Leg 2 drives back up the side road, then continues north 10 miles.
+    back = [(10 * step, k * step * 1.3) for k in (3, 2, 1, 0)]
+    on = [((10 + k) * step, 0.0) for k in range(1, 11)]
+    leg2 = from_segment_durations(back + on, [60.0] * 13, 780.0)
+    j = join([leg1, leg2], "valhalla")
+    assert j.distance_mi == pytest.approx(20.0, rel=0.01)  # the 6-mile spur is gone
+    assert j.drive_s == pytest.approx(20 * 60.0)  # and so is its time
+    assert all(lon == 0.0 for _, lon in j.coords)

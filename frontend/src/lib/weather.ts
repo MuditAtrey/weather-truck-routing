@@ -21,6 +21,19 @@ type Location = { hourly: Hourly }
 
 export class WeatherError extends Error {}
 
+// Forecasts already downloaded in this tab, by location. Re-planning the same trip (a
+// different weight, interval or departure) reuses them instead of spending quota again.
+const CACHE_MS = 30 * 60_000
+const cache = new Map<string, { at: number; hourly: Hourly }>()
+const keyOf = (p: WeatherPoint) => `${p.lat},${p.lon}`
+
+function cached(p: WeatherPoint): Hourly | null {
+  const hit = cache.get(keyOf(p))
+  if (!hit || Date.now() - hit.at > CACHE_MS) return null
+  const t = hit.hourly.time
+  return t.length && t[0]! <= p.start && t[t.length - 1]! >= p.end ? hit.hourly : null
+}
+
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     const t = setTimeout(resolve, ms)
@@ -46,13 +59,20 @@ async function request(chunk: WeatherPoint[], forecastHours: number, signal?: Ab
       const data = (await res.json()) as Location | Location[]
       return Array.isArray(data) ? data : [data]
     }
-    const reason = (await res.json().catch(() => null))?.reason ?? `HTTP ${res.status}`
+    const reason: string = (await res.json().catch(() => null))?.reason ?? `HTTP ${res.status}`
+    const retryAfter = Number(res.headers.get('Retry-After') ?? 30)
     if (res.status === 429 && attempt < 2 && !/daily|hourly/i.test(reason)) {
-      const wait = Number(res.headers.get('Retry-After') ?? 30)
-      await sleep(Math.min(65, Math.max(5, wait)) * 1000, signal)
+      await sleep(Math.min(65, Math.max(5, retryAfter)) * 1000, signal)
       continue
     }
-    throw new WeatherError(`Weather service: ${reason}`)
+    if (res.status === 429) {
+      const when = /daily/i.test(reason) ? 'tomorrow' : `in about ${Math.max(1, Math.ceil(retryAfter / 60))} min`
+      throw new WeatherError(
+        `The free weather service's limit for your network has been reached (${/daily/i.test(reason) ? 'daily' : 'hourly'}). ` +
+          `Try again ${when}, or use a 25 or 50 mi interval, which needs fewer forecasts.`,
+      )
+    }
+    throw new WeatherError(`Weather service error: ${reason}`)
   }
 }
 
@@ -95,20 +115,34 @@ export async function fetchForecasts(
   const lastEnd = Math.max(...points.map((p) => p.end))
   const forecastHours = Math.min(384, Math.ceil((lastEnd - nowHour) / HOUR) + 2)
   const weather = points.map(missing)
+  // Fill what this tab already has; only download the rest.
+  const need: number[] = []
+  points.forEach((p, i) => {
+    const hit = cached(p)
+    if (hit) weather[i] = slice(hit, p)
+    else need.push(i)
+  })
+  if (!need.length) {
+    await onBatch(weather, points.length)
+    return
+  }
+  const todo = need.map((i) => points[i]!)
+  const firstTodo = need.filter((i) => i < firstBatch).length
 
   // Everything in one request if it fits; otherwise checkpoints first, then the rest.
+  const first = Math.max(1, Math.min(firstTodo || todo.length, MAX_PER_REQUEST))
   const cuts =
-    points.length <= MAX_PER_REQUEST
-      ? [0, points.length]
-      : [0, Math.min(firstBatch, MAX_PER_REQUEST)].concat(
-          Array.from({ length: Math.ceil((points.length - firstBatch) / MAX_PER_REQUEST) }, (_, k) =>
-            Math.min(points.length, firstBatch + (k + 1) * MAX_PER_REQUEST),
+    todo.length <= MAX_PER_REQUEST
+      ? [0, todo.length]
+      : [0, first].concat(
+          Array.from({ length: Math.ceil((todo.length - first) / MAX_PER_REQUEST) }, (_, k) =>
+            Math.min(todo.length, first + (k + 1) * MAX_PER_REQUEST),
           ),
         )
   let windowStart = 0
   let spent = 0
   for (let k = 0; k + 1 < cuts.length; k++) {
-    const chunk = points.slice(cuts[k], cuts[k + 1])
+    const chunk = todo.slice(cuts[k], cuts[k + 1])
     if (spent >= PER_MINUTE || (spent > 0 && spent + chunk.length > PER_MINUTE)) {
       const waitMs = Math.max(0, 61_000 - (performance.now() - windowStart))
       onWait(Math.ceil(waitMs / 1000))
@@ -118,8 +152,12 @@ export async function fetchForecasts(
     if (spent === 0) windowStart = performance.now()
     const locations = await request(chunk, forecastHours, signal)
     if (locations.length !== chunk.length) throw new WeatherError('Weather service returned the wrong number of locations')
-    chunk.forEach((p, i) => (weather[cuts[k]! + i] = slice(locations[i]!.hourly, p)))
+    chunk.forEach((p, i) => {
+      const hourly = locations[i]!.hourly
+      cache.set(keyOf(p), { at: Date.now(), hourly })
+      weather[need[cuts[k]! + i]!] = slice(hourly, p)
+    })
     spent += chunk.length
-    await onBatch(weather, cuts[k + 1]!)
+    await onBatch(weather, k + 2 >= cuts.length ? points.length : 0)
   }
 }

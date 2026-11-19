@@ -101,3 +101,12 @@ def offset_point(origin: LatLon, dest: LatLon, along: float, side_mi: float) -> 
     norm = math.hypot(dx, dy) or 1.0
     nx, ny = -dy / norm, dx / norm  # left normal
     return lat + ny * side_mi / ky, lon + nx * side_mi / kx
+
+
+def bearing_deg(a: LatLon, b: LatLon) -> float:
+    """Initial compass bearing from a to b, 0-360 degrees clockwise from north."""
+    lat1, lat2 = math.radians(a[0]), math.radians(b[0])
+    dlon = math.radians(b[1] - a[1])
+    x = math.sin(dlon) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360

@@ -97,7 +97,12 @@ async def test_plan_then_score_round_trip() -> None:
     r = await aclient.post("/plan", json=body())
     assert r.status_code == 200, r.json()
     plan = r.json()
-    assert plan["router"] == {"provider": "valhalla", "profile": "truck", "fallback_reason": None}
+    assert plan["router"] == {
+        "provider": "valhalla",
+        "profile": "truck",
+        "fallback_reason": None,
+        "legs": 1,
+    }
     assert len(plan["routes"]["features"]) == 3
     assert len(plan["hours"]) == 49
     assert all(f["id"] >= 1 for f in plan["grid"]["features"])

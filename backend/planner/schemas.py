@@ -37,6 +37,7 @@ class RouterInfo(Schema):
     provider: Literal["valhalla", "osrm"]
     profile: Literal["truck", "car_capped"]
     fallback_reason: str | None
+    legs: int = Field(default=1, description="Valhalla requests stitched into each route")
 
 
 class PlanOut(Schema):

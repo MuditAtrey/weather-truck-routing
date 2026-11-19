@@ -24,6 +24,7 @@ const WARNINGS: Record<string, string> = {
   fewer_than_3_routes: 'Only found fewer than 3 genuinely different routes for this trip.',
   snapped_far: 'A point you picked is over a mile from the nearest road; the route starts at the closest road.',
   crosses_canada: 'A route crosses into Canada (border crossing and customs). Choose another route for a domestic load.',
+  truck_routes_converge: 'Two corridors ended up on the same truck roads, so some options are near-duplicates.',
   truck_restrictions_relaxed: 'The router relaxed some truck restrictions to find a route. Check bridge heights and weight limits.',
 }
 const FALLBACK: Record<string, string> = {
@@ -31,6 +32,7 @@ const FALLBACK: Record<string, string> = {
   valhalla_unavailable: 'The truck router is not responding, so routes come from OSRM (car roads, truck speed capped at 65 mph).',
   valhalla_slow: 'The truck router was slow, so routes come from OSRM (car roads, truck speed capped at 65 mph).',
   valhalla_disabled: 'Routes come from OSRM (car roads, truck speed capped at 65 mph).',
+  valhalla_legs_failed: 'Truck routing could not finish every leg of this long trip, so routes come from OSRM (car roads, truck speed capped at 65 mph).',
 }
 const STATUS: Record<string, string> = {
   all_no_travel: 'No route is safe to dispatch at this time: every option has No Travel miles. Try a later departure.',
@@ -116,6 +118,7 @@ export default function App() {
     }
   }
 
+  const longHaul = lastRequest.current ? straightKm(lastRequest.current) > 1450 : false
   const busy = phase.kind === 'routing' || phase.kind === 'weather' || phase.kind === 'scoring'
   const result = score ? score[mode] : null
   const status = result?.ranking.status
@@ -140,7 +143,9 @@ export default function App() {
         <TripForm busy={busy} onSubmit={start} onCancel={cancel} />
 
         <section className="results" aria-live="polite" aria-busy={busy}>
-          {phase.kind === 'routing' && <Progress text="Finding three routes…" />}
+          {phase.kind === 'routing' && (
+            <Progress text={longHaul ? 'Long trip: truck-routing each corridor in legs (about 15–30 s)…' : 'Finding three routes…'} />
+          )}
           {phase.kind === 'weather' && <Progress text={`Fetching forecasts for ${phase.total} locations…`} />}
           {phase.kind === 'heatmap' && (
             <p className="notice info">
@@ -166,7 +171,9 @@ export default function App() {
                   <span className="sr-only"> to </span> {labels[1]}
                 </h2>
                 <span className={`router ${plan.router.provider}`} title="Which routing service answered">
-                  {plan.router.provider === 'valhalla' ? 'Truck routing · Valhalla' : 'Car routing · OSRM'}
+                  {plan.router.provider === 'valhalla'
+                    ? `Truck routing · Valhalla${(plan.router.legs ?? 1) > 1 ? `, ${plan.router.legs} legs` : ''}`
+                    : 'Car routing · OSRM'}
                 </span>
               </div>
               {plan.router.fallback_reason && <p className="notice info">{FALLBACK[plan.router.fallback_reason]}</p>}
@@ -223,6 +230,14 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+function straightKm(r: PlanIn): number {
+  const rad = Math.PI / 180
+  const a = r.origin, b = r.destination
+  const h = Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lon - a.lon) * rad) / 2) ** 2
+  return 2 * 6371 * Math.asin(Math.sqrt(h))
 }
 
 function Progress({ text, value }: { text: string; value?: number }) {
