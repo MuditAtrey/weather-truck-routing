@@ -73,9 +73,13 @@ export function nearestPlace(point: [number, number]): Promise<string> {
       .then((d) => {
         const props = d?.features?.[0]?.properties
         if (!props) return ''
-        const town = props.city ?? props.county ?? (props.type === 'city' ? props.name : undefined)
         const state = props.state ? (STATE_ABBR[props.state] ?? props.state) : ''
-        return town ? `near ${town}${state ? `, ${state}` : ''}` : ''
+        const tail = state ? `, ${state}` : ''
+        const town = props.city ?? (props.type === 'city' ? props.name : undefined)
+        if (town) return `near ${town}${tail}`
+        // Rural stretches often have no town: name the county, as NWS warnings do.
+        if (props.county) return `in ${/county|parish|borough/i.test(props.county) ? props.county : `${props.county} County`}${tail}`
+        return ''
       })
       .catch(() => '')
     placeCache.set(key, p)
