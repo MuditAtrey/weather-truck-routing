@@ -29,6 +29,7 @@ INSTALLED_APPS = ["planner"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",  # Ninja's JSON endpoints opt out
 ]
 
 ROOT_URLCONF = "config.urls"
