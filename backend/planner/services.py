@@ -258,24 +258,24 @@ def _is_empty(pw: Any) -> bool:
     return all(v is None for arr in (pw.wind, pw.gust, pw.rain, pw.showers, pw.snow) for v in arr)
 
 
-async def _fill_missing(req: ScoreIn, tok: dict[str, Any]) -> tuple[int, bool]:
+async def _fill_missing(req: ScoreIn, tok: dict[str, Any]) -> tuple[int, bool, str]:
     """Fetch, from this server, every point the browser could not download.
 
     Returns how many points were filled and whether the fetch succeeded.
     """
     missing = [i for i, pw in enumerate(req.weather) if _is_empty(pw)]
     if not missing:
-        return 0, True
+        return 0, True, ""
     ranges = tok["wp"]
     pts = [tuple(tok["pts"][i]) for i in missing]
     try:
         series = await openmeteo.fetch(pts, max(ranges[i][1] for i in missing))
-    except openmeteo.WeatherUnavailable:
-        return 0, False
+    except openmeteo.WeatherUnavailable as exc:
+        return 0, False, str(exc)
     for i, h in zip(missing, series, strict=True):
         filled = openmeteo.window(h, ranges[i][0], ranges[i][1])
         req.weather[i] = PointWeather(**filled)
-    return len(missing), True
+    return len(missing), True, ""
 
 
 async def score(req: ScoreIn) -> dict[str, Any]:
@@ -289,9 +289,9 @@ async def score(req: ScoreIn) -> dict[str, Any]:
     ranges: list[list[int]] = tok["wp"]
     if len(req.weather) != len(ranges):
         raise PlanError("weather_mismatch", "Weather must have one entry per weather point")
-    filled, server_ok = 0, True
+    filled, server_ok, server_error = 0, True, ""
     if req.fetch_missing:
-        filled, server_ok = await _fill_missing(req, tok)
+        filled, server_ok, server_error = await _fill_missing(req, tok)
     series: list[Series] = []
     for pw, (start, end) in zip(req.weather, ranges, strict=True):
         n = (end - start) // HOUR + 1
@@ -313,6 +313,7 @@ async def score(req: ScoreIn) -> dict[str, Any]:
     out: dict[str, Any] = {
         "server_filled": filled,
         "server_weather_ok": server_ok,
+        "server_weather_error": server_error,
         "conditions": [
             {"wind": s.wind_mph, "gust": s.gust_mph, "rain": s.rain_in_hr, "snow": s.snow_in_hr}
             for s in samples

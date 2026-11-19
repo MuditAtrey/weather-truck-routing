@@ -110,6 +110,9 @@ class CheckpointWeather(Schema):
 class ScoreOut(Schema):
     server_filled: int = Field(description="Points the server downloaded itself")
     server_weather_ok: bool
+    server_weather_error: str = Field(
+        default="", description="Why the server could not fetch, if it failed"
+    )
     conditions: list[CheckpointWeather]
     sustained: ModeResult
     gust: ModeResult

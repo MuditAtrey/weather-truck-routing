@@ -280,6 +280,12 @@ export interface components {
             server_filled: number;
             /** Server Weather Ok */
             server_weather_ok: boolean;
+            /**
+             * Server Weather Error
+             * @description Why the server could not fetch, if it failed
+             * @default
+             */
+            server_weather_error: string;
             /** Conditions */
             conditions: components["schemas"]["CheckpointWeather"][];
             sustained: components["schemas"]["ModeResult"];

@@ -622,6 +622,12 @@
             "title": "Server Weather Ok",
             "type": "boolean"
           },
+          "server_weather_error": {
+            "default": "",
+            "description": "Why the server could not fetch, if it failed",
+            "title": "Server Weather Error",
+            "type": "string"
+          },
           "conditions": {
             "items": {
               "$ref": "#/components/schemas/CheckpointWeather"

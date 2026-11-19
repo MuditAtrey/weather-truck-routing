@@ -6,6 +6,7 @@ Django fetches the missing points from its own address instead.
 """
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -62,7 +63,10 @@ async def fetch(points: Sequence[LatLon], last_hour: int) -> list[Hourly]:
             await asyncio.sleep(wait)
             resp = await _post(data)
         if resp.status_code != 200:
-            raise WeatherUnavailable(f"HTTP {resp.status_code}")
+            reason = ""
+            with contextlib.suppress(ValueError):
+                reason = str(resp.json().get("reason", ""))
+            raise WeatherUnavailable(reason or f"HTTP {resp.status_code}")
         body = resp.json()
         locations = body if isinstance(body, list) else [body]
         if len(locations) != len(chunk):

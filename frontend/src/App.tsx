@@ -122,7 +122,13 @@ export default function App() {
         setPhase({ kind: 'server-weather', reason: e.message })
         try {
           const s = await api.score(p.token, p.weather_points.map(missing), signal, true)
-          if (!s.server_weather_ok) throw new Error(`${e.message} The server could not get forecasts either; try again later.`)
+          if (!s.server_weather_ok) {
+            const why = s.server_weather_error || ''
+            const when = /daily/i.test(why) ? 'tomorrow' : /hourly/i.test(why) ? 'within the hour' : 'in a minute'
+            throw new Error(
+              `${e.message} The server's weather allowance is used up too (${why || 'service unavailable'}). Try again ${when}.`,
+            )
+          }
           show(s)
           setServerWeather(true)
           setPhase({ kind: 'done' })
