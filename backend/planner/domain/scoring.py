@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .forecast import Sample
-from .risk import Conditions, Level, assess
+from .risk import Conditions, Level, assess, severity_index
 
 WindMode = Literal["sustained", "gust"]
 
@@ -36,6 +36,14 @@ class PointRisk:
     wind_mph: float | None
     rain_in_hr: float | None
     snow_in_hr: float | None
+
+
+def point_index(sample: Sample, cargo_lb: int, mode: WindMode) -> float | None:
+    """Continuous 0-4 severity for the heatmap; None when the forecast is missing."""
+    wind = sample.wind_mph if mode == "sustained" else sample.gust_mph
+    if wind is None or sample.rain_in_hr is None or sample.snow_in_hr is None:
+        return None
+    return severity_index(Conditions(wind, sample.rain_in_hr, sample.snow_in_hr), cargo_lb)
 
 
 def point_risk(sample: Sample, cargo_lb: int, mode: WindMode) -> PointRisk:

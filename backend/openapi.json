@@ -221,6 +221,11 @@
             "title": "Grid",
             "type": "object"
           },
+          "checkpoint_points": {
+            "description": "The first N weather points are checkpoints; the rest are heatmap cells",
+            "title": "Checkpoint Points",
+            "type": "integer"
+          },
           "weather_points": {
             "items": {
               "$ref": "#/components/schemas/WeatherPoint"
@@ -239,6 +244,7 @@
           "routes",
           "checkpoints",
           "grid",
+          "checkpoint_points",
           "weather_points"
         ],
         "title": "PlanOut",
@@ -484,7 +490,7 @@
             "$ref": "#/components/schemas/RankingOut"
           },
           "heatmap": {
-            "description": "Per hour, one char per grid cell: 0-4 or u",
+            "description": "Per hour, base64 bytes, one per grid cell: severity x 50 (0-200), 255 unknown",
             "items": {
               "type": "string"
             },

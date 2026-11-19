@@ -127,7 +127,10 @@ async def test_plan_then_score_round_trip() -> None:
     assert out["gust"]["ranking"]["recommended"] is None
     assert out["gust"]["ranking"]["status"] == "all_no_travel"
     assert len(out["gust"]["heatmap"]) == 49
-    assert set(out["gust"]["heatmap"][0]) == {"4"}
+    import base64
+
+    assert set(base64.b64decode(out["gust"]["heatmap"][0])) == {200}  # No Travel everywhere
+    assert set(base64.b64decode(out["sustained"]["heatmap"][0])) == {20}  # 10 mph: 0.4 into Low
 
     # Missing forecasts are unknown, never calm.
     for w in weather:

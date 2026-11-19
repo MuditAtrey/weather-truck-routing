@@ -49,6 +49,9 @@ class PlanOut(Schema):
     routes: dict[str, Any] = Field(description="GeoJSON FeatureCollection of LineStrings")
     checkpoints: dict[str, Any] = Field(description="GeoJSON FeatureCollection of Points")
     grid: dict[str, Any] = Field(description="GeoJSON FeatureCollection of Polygons")
+    checkpoint_points: int = Field(
+        description="The first N weather points are checkpoints; the rest are heatmap cells"
+    )
     weather_points: list[WeatherPoint]
 
 
@@ -87,7 +90,9 @@ class ModeResult(Schema):
     checkpoint_drivers: str = Field(description="w(ind), r(ain), s(now), or - per checkpoint")
     routes: list[RouteScore]
     ranking: RankingOut
-    heatmap: list[str] = Field(description="Per hour, one char per grid cell: 0-4 or u")
+    heatmap: list[str] = Field(
+        description="Per hour, base64 bytes, one per grid cell: severity x 50 (0-200), 255 unknown"
+    )
 
 
 class CheckpointWeather(Schema):

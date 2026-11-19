@@ -1,12 +1,18 @@
-// The map is created once and driven imperatively. React never re-renders it on slider
-// moves: the heatmap hour arrives through hourStore and only cells whose risk level
-// changed get a setFeatureState call (measured at ~2.4 ms per hour step for 1,500 cells).
-import { useEffect, useRef, useState } from 'react'
+// The map is created once and driven imperatively; React never re-renders it.
+//
+// Layers, bottom to top:
+//   heat        smooth risk surface (canvas image), redrawn when the slider hour changes
+//   route-*     all routes in grey; the selected one is drawn as risk-coloured segments
+//   cp          checkpoint dots on the selected route (they grow as you zoom in)
+//   truck       where the truck is at the slider's hour
+// Risk colours come from feature-state, so changing wind mode never re-uploads geometry.
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Map as MlMap,
   NavigationControl,
   Popup,
   setWorkerUrl,
+  type CanvasSource,
   type GeoJSONSource,
   type LngLatBoundsLike,
   type MapLayerMouseEvent,
@@ -16,8 +22,10 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 import type { Feature, FeatureCollection, Point } from 'geojson'
 import type { Plan, ScoreOut } from '../api/client'
 import { clock, num } from '../lib/format'
+import { createHeatCanvas, decodeHours } from '../lib/heatCanvas'
 import { hourStore } from '../lib/hourStore'
 import { DRIVERS, LEVEL_COLORS, LEVELS, UNKNOWN_COLOR, levelAt, type WindMode } from '../lib/risk'
+import { routeSegments } from '../lib/segments'
 
 setWorkerUrl(workerUrl)
 
@@ -25,12 +33,13 @@ const STYLE = 'https://tiles.openfreemap.org/styles/positron'
 const LABEL_LAYER = 'waterway_line_label' // first label layer in Positron: data goes under labels
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
+const SELECTED_LOW = '#1e3a8a' // the selected route reads as "selected" where risk is Low
 
-const levelColor = (fallback: string) =>
+const levelColor = (low: string) =>
   [
     'match', ['coalesce', ['feature-state', 'level'], -1],
-    0, LEVEL_COLORS[0], 1, LEVEL_COLORS[1], 2, LEVEL_COLORS[2], 3, LEVEL_COLORS[3], 4, LEVEL_COLORS[4],
-    fallback,
+    0, low, 1, LEVEL_COLORS[1], 2, LEVEL_COLORS[2], 3, LEVEL_COLORS[3], 4, LEVEL_COLORS[4],
+    UNKNOWN_COLOR,
   ] as unknown as string
 
 interface Props {
@@ -47,9 +56,12 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
   const mapRef = useRef<MlMap | null>(null)
   const [ready, setReady] = useState(false)
   const [failed, setFailed] = useState(false)
-  // Latest props for event handlers registered once.
-  const live = useRef({ plan, score, mode, selected, onSelect })
-  live.current = { plan, score, mode, selected, onSelect }
+  const live = useRef({ plan, score, mode, selected, onSelect, heatmapOn })
+  live.current = { plan, score, mode, selected, onSelect, heatmapOn }
+
+  const heat = useMemo(() => (plan ? createHeatCanvas(plan.grid) : null), [plan])
+  const heatHours = useMemo(() => (score ? decodeHours(score[mode].heatmap) : null), [score, mode])
+  const segments = useMemo(() => (plan ? routeSegments(plan) : null), [plan])
 
   // Create the map once.
   useEffect(() => {
@@ -76,30 +88,11 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     map.touchZoomRotate.disableRotation()
 
     map.on('load', () => {
-      map.addSource('grid', { type: 'geojson', data: EMPTY })
+      const before = map.getLayer(LABEL_LAYER) ? LABEL_LAYER : undefined
       map.addSource('routes', { type: 'geojson', data: EMPTY })
+      map.addSource('segments', { type: 'geojson', data: EMPTY })
       map.addSource('checkpoints', { type: 'geojson', data: EMPTY })
       map.addSource('truck', { type: 'geojson', data: EMPTY })
-      const before = map.getLayer(LABEL_LAYER) ? LABEL_LAYER : undefined
-      map.addLayer(
-        {
-          id: 'grid-fill',
-          type: 'fill',
-          source: 'grid',
-          paint: {
-            'fill-color': levelColor(UNKNOWN_COLOR),
-            'fill-opacity': [
-              'match', ['coalesce', ['feature-state', 'level'], -2],
-              -2, 0, // not scored yet
-              0, 0, // Low: let the basemap show through
-              -1, 0.28, // unknown
-              0.5,
-            ],
-            'fill-antialias': false,
-          },
-        },
-        before,
-      )
       map.addLayer(
         {
           id: 'route-casing',
@@ -115,19 +108,32 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
         type: 'line',
         source: 'routes',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#7c8797', 'line-width': 3, 'line-opacity': 0.75 },
+        paint: { 'line-color': '#7c8797', 'line-width': 3, 'line-opacity': 0.7 },
+      })
+      map.addLayer({
+        id: 'route-risk',
+        type: 'line',
+        source: 'segments',
+        filter: ['==', ['get', 'route'], -1],
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': levelColor(SELECTED_LOW),
+          'line-width': ['interpolate', ['linear'], ['zoom'], 3, 4, 8, 6, 12, 8],
+        },
       })
       map.addLayer({
         id: 'cp',
         type: 'circle',
         source: 'checkpoints',
+        filter: ['==', ['get', 'route'], -1],
         paint: {
-          'circle-color': levelColor(UNKNOWN_COLOR),
-          'circle-radius': 3,
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 1,
-          'circle-opacity': 0.55,
-          'circle-stroke-opacity': 0.55,
+          'circle-color': levelColor(SELECTED_LOW),
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 2, 7, 3.5, 10, 6],
+          // Zoomed out, the coloured line carries the risk; dots appear as you zoom in.
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 5.5, 0, 6.5, 1],
+          'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 5.5, 0, 6.5, 1],
+          'circle-stroke-color': ['case', ['==', ['feature-state', 'level'], 4], '#111827', '#ffffff'],
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 3, 0.5, 8, 1.5],
         },
       })
       map.addLayer({
@@ -145,7 +151,7 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     })
 
     const popup = new Popup({ closeButton: false, closeOnClick: false, maxWidth: '260px', offset: 10 })
-    map.on('mousemove', 'cp', (e: MapLayerMouseEvent) => {
+    const showCheckpoint = (e: MapLayerMouseEvent) => {
       const f = e.features?.[0]
       const { plan: p, score: s, mode: m } = live.current
       if (!f || !p || f.id === undefined) return
@@ -170,16 +176,15 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
             '</div>',
         )
         .addTo(map)
-    })
-    map.on('mouseleave', 'cp', () => {
+    }
+    const hide = () => {
       map.getCanvas().style.cursor = ''
       popup.remove()
-    })
-    map.on('click', 'cp', (e) => {
-      const i = Number(e.features?.[0]?.id) - 1
-      const r = live.current.plan?.checkpoints.features[i]?.properties.route
-      if (r !== undefined) live.current.onSelect(r)
-    })
+    }
+    for (const layer of ['cp', 'route-risk']) {
+      map.on('mousemove', layer, showCheckpoint)
+      map.on('mouseleave', layer, hide)
+    }
     map.on('click', 'route-line', (e) => {
       const r = e.features?.[0]?.properties?.id
       if (typeof r === 'number') live.current.onSelect(r)
@@ -199,59 +204,61 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     const map = mapRef.current
     if (!map || !ready) return
     const src = (id: string) => map.getSource(id) as GeoJSONSource
-    for (const id of ['grid', 'checkpoints']) map.removeFeatureState({ source: id })
+    for (const id of ['segments', 'checkpoints']) map.removeFeatureState({ source: id })
     src('routes').setData(plan?.routes ?? EMPTY)
+    src('segments').setData(segments ?? EMPTY)
     src('checkpoints').setData(plan?.checkpoints ?? EMPTY)
-    src('grid').setData(plan?.grid ?? EMPTY)
     src('truck').setData(EMPTY)
+    // A canvas source is bound to one canvas, so each plan gets a fresh source.
+    if (map.getLayer('heat')) map.removeLayer('heat')
+    if (map.getSource('heat')) map.removeSource('heat')
+    if (heat) {
+      map.addSource('heat', { type: 'canvas', canvas: heat.canvas, coordinates: heat.coordinates, animate: false })
+      map.addLayer(
+        {
+          id: 'heat',
+          type: 'raster',
+          source: 'heat',
+          layout: { visibility: live.current.heatmapOn ? 'visible' : 'none' },
+          paint: { 'raster-resampling': 'linear', 'raster-fade-duration': 0, 'raster-opacity': 0.9 },
+        },
+        'route-casing',
+      )
+    }
     if (plan && plan.routes.features.length) {
       let w = 180, s = 90, e = -180, n = -90
       for (const f of plan.routes.features)
         for (const [x, y] of f.geometry.coordinates) {
-          if (x! < w) w = x!
-          if (x! > e) e = x!
-          if (y! < s) s = y!
-          if (y! > n) n = y!
+          w = Math.min(w, x!); e = Math.max(e, x!); s = Math.min(s, y!); n = Math.max(n, y!)
         }
       const wide = window.innerWidth >= 900
       map.fitBounds([[w, s], [e, n]], {
-        padding: wide ? { top: 60, bottom: 130, left: 60, right: 60 } : 30,
+        padding: wide ? { top: 70, bottom: 140, left: 60, right: 60 } : 30,
         duration: 600,
       })
     }
-  }, [plan, ready])
+  }, [plan, segments, heat, ready])
 
-  // Route selection: emphasise one route and its checkpoints.
+  // Route selection: grey alternatives, risk-coloured selected route and its checkpoints.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
     const isSel = ['==', ['get', 'id'], selected]
-    const cpSel = ['==', ['get', 'route'], selected]
-    map.setPaintProperty('route-line', 'line-color', ['case', isSel, '#1e3a8a', '#7c8797'] as never)
-    map.setPaintProperty('route-line', 'line-width', ['case', isSel, 5, 3] as never)
-    map.setPaintProperty('route-line', 'line-opacity', ['case', isSel, 1, 0.6] as never)
-    map.setPaintProperty('route-casing', 'line-width', ['case', isSel, 9, 6] as never)
-    map.setLayoutProperty('route-line', 'line-sort-key', ['case', isSel, 1, 0] as never)
-    map.setLayoutProperty('route-casing', 'line-sort-key', ['case', isSel, 1, 0] as never)
-    map.setPaintProperty('cp', 'circle-radius', ['case', cpSel, 6, 3] as never)
-    map.setPaintProperty('cp', 'circle-opacity', ['case', cpSel, 1, 0.5] as never)
-    map.setPaintProperty('cp', 'circle-stroke-opacity', ['case', cpSel, 1, 0.5] as never)
-    map.setPaintProperty('cp', 'circle-stroke-width', [
-      'case', ['all', cpSel, ['==', ['feature-state', 'level'], 4]], 3, cpSel, 1.5, 1,
-    ] as never)
-    map.setPaintProperty('cp', 'circle-stroke-color', [
-      'case', ['==', ['feature-state', 'level'], 4], '#111827', '#ffffff',
-    ] as never)
-    map.setLayoutProperty('cp', 'circle-sort-key', ['case', cpSel, 1, 0] as never)
+    map.setPaintProperty('route-line', 'line-opacity', ['case', isSel, 0, 0.7] as never)
+    map.setPaintProperty('route-casing', 'line-width', ['case', isSel, 10, 6] as never)
+    map.setFilter('route-risk', ['==', ['get', 'route'], selected])
+    map.setFilter('cp', ['==', ['get', 'route'], selected])
   }, [selected, ready, plan])
 
-  // Checkpoint colours for the current wind mode.
+  // Checkpoint and segment colours for the current wind mode.
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !ready || !plan || !score) return
-    const levels = score[mode].checkpoint_levels
+    if (!map || !ready || !plan) return
+    const levels = score?.[mode].checkpoint_levels
     for (let i = 0; i < plan.checkpoints.features.length; i++) {
-      map.setFeatureState({ source: 'checkpoints', id: i + 1 }, { level: levelAt(levels, i) ?? -1 })
+      const level = levels ? (levelAt(levels, i) ?? -1) : 0
+      map.setFeatureState({ source: 'checkpoints', id: i + 1 }, { level })
+      map.setFeatureState({ source: 'segments', id: i + 1 }, { level })
     }
   }, [plan, score, mode, ready])
 
@@ -259,22 +266,21 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready || !plan) return
-    const nCells = plan.grid.features.length
-    const last = new Int8Array(nCells).fill(-3)
     let raf = 0
+    let drawn = -1
     const truckSrc = map.getSource('truck') as GeoJSONSource
-
+    const heatSrc = map.getSource('heat') as CanvasSource | undefined
     const apply = () => {
       raf = 0
       const h = hourStore.get()
-      if (score) {
-        const levels = score[mode].heatmap[h] ?? ''
-        for (let i = 0; i < nCells; i++) {
-          const v = levelAt(levels, i) ?? -1
-          if (v !== last[i]) {
-            last[i] = v
-            map.setFeatureState({ source: 'grid', id: i + 1 }, { level: v })
-          }
+      if (heat && heatHours && h !== drawn) {
+        const values = heatHours[h]
+        if (values) {
+          heat.draw(values)
+          drawn = h
+          // A paused canvas source re-uploads only when played; one frame is enough.
+          heatSrc?.play()
+          requestAnimationFrame(() => heatSrc?.pause())
         }
       }
       truckSrc.setData(truckAt(plan, live.current.selected, plan.hours[h] ?? 0))
@@ -288,13 +294,13 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       unsub()
       cancelAnimationFrame(raf)
     }
-  }, [plan, score, mode, ready, selected])
+  }, [plan, heat, heatHours, ready, selected])
 
   useEffect(() => {
     const map = mapRef.current
     if (!map || !ready) return
-    map.setLayoutProperty('grid-fill', 'visibility', heatmapOn ? 'visible' : 'none')
-  }, [heatmapOn, ready])
+    if (map.getLayer('heat')) map.setLayoutProperty('heat', 'visibility', heatmapOn ? 'visible' : 'none')
+  }, [heatmapOn, ready, heat])
 
   if (failed) {
     return (

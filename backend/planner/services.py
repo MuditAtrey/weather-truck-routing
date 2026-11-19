@@ -6,6 +6,7 @@ its own quota, and Django does all of the scoring. The plan is handed to the bro
 a signed token, so /score can trust the checkpoints and times without storing anything.
 """
 
+import base64
 import functools
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -19,7 +20,7 @@ from .domain import checkpoints as cp
 from .domain.forecast import HOUR, Series, ceil_hour, floor_hour, sample_at, sample_hour
 from .domain.geo import LatLon, haversine_mi
 from .domain.grid import corridor
-from .domain.scoring import WindMode, point_risk, rank, summarize
+from .domain.scoring import WindMode, point_index, point_risk, rank, summarize
 from .providers.router import find_routes
 from .schemas import PlanIn, ScoreIn
 
@@ -162,6 +163,7 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
                 )
             )
 
+    checkpoint_points = len(points.ranges)  # these come first, so routes can be scored early
     hours = [floor_hour(dep_epoch) + k * HOUR for k in range(HEATMAP_HOURS + 1)]
     cells = corridor([r.coords for r in result.routes])
     cell_points = [points.add(c.center, hours[0], hours[-1], rounding=3) for c in cells]
@@ -196,6 +198,7 @@ async def plan(req: PlanIn, now: datetime | None = None) -> dict[str, Any]:
         "routes": {"type": "FeatureCollection", "features": route_features},
         "checkpoints": {"type": "FeatureCollection", "features": cp_features},
         "grid": {"type": "FeatureCollection", "features": grid_features},
+        "checkpoint_points": checkpoint_points,
         "weather_points": [
             {"lat": lat, "lon": lon, "start": s, "end": e}
             for (lat, lon), (s, e) in zip(points.coords, points.ranges, strict=True)
@@ -258,15 +261,15 @@ def score(req: ScoreIn) -> dict[str, Any]:
                 )
             )
         ranking = rank(summaries)
-        heatmap = []
+        heatmap: list[str] = []
         for k in range(n_hours):
             hour_end = hour0 + k * HOUR
-            heatmap.append(
-                "".join(
-                    _level_char(point_risk(sample_hour(s, hour_end), cargo, mode).level)
-                    for s in cell_series
-                )
+            # One byte per cell: severity index x 50 (0-200), or 255 when unknown.
+            values = bytes(
+                255 if v is None else round(v * 50)
+                for v in (point_index(sample_hour(s, hour_end), cargo, mode) for s in cell_series)
             )
+            heatmap.append(base64.b64encode(values).decode())
         out[mode] = {
             "checkpoint_levels": "".join(_level_char(r.level) for r in risks),
             "checkpoint_drivers": "".join((r.driver or "-")[0] for r in risks),

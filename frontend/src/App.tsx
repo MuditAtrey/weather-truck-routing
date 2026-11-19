@@ -14,7 +14,8 @@ const MapView = lazy(() => import('./components/MapView'))
 type Phase =
   | { kind: 'idle' }
   | { kind: 'routing' }
-  | { kind: 'weather'; done: number; total: number; waitingS?: number }
+  | { kind: 'weather'; total: number }
+  | { kind: 'heatmap'; waitingS: number } // routes are scored; heatmap cells still loading
   | { kind: 'scoring' }
   | { kind: 'done' }
   | { kind: 'error'; message: string; stage: 'route' | 'weather' }
@@ -54,19 +55,24 @@ export default function App() {
   }, [])
 
   const runWeather = useCallback(async (p: Plan, signal: AbortSignal) => {
-    setPhase({ kind: 'weather', done: 0, total: p.weather_points.length })
+    setPhase({ kind: 'weather', total: p.weather_points.length })
+    let first = true
     try {
-      const weather = await fetchForecasts(
+      await fetchForecasts(
         p.weather_points,
-        (done, total, waitingS) => setPhase({ kind: 'weather', done, total, waitingS }),
+        p.checkpoint_points,
+        async (weather, done) => {
+          const s = await api.score(p.token, weather, signal)
+          setScore(s)
+          if (first) {
+            first = false
+            setSelected(s[mode].ranking.recommended ?? s[mode].ranking.order[0] ?? 0)
+          }
+          setPhase(done >= p.weather_points.length ? { kind: 'done' } : { kind: 'heatmap', waitingS: 0 })
+        },
+        (waitingS) => setPhase({ kind: 'heatmap', waitingS }),
         signal,
       )
-      setPhase({ kind: 'scoring' })
-      const s = await api.score(p.token, weather, signal)
-      setScore(s)
-      const rec = s[mode].ranking.recommended ?? s[mode].ranking.order[0] ?? 0
-      setSelected(rec)
-      setPhase({ kind: 'done' })
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
       setPhase({ kind: 'error', stage: 'weather', message: (e as Error).message })
@@ -135,15 +141,12 @@ export default function App() {
 
         <section className="results" aria-live="polite" aria-busy={busy}>
           {phase.kind === 'routing' && <Progress text="Finding three routes…" />}
-          {phase.kind === 'weather' && (
-            <Progress
-              text={
-                phase.waitingS
-                  ? `Pausing ${phase.waitingS}s for the weather service’s rate limit…`
-                  : `Fetching forecasts: ${phase.done} of ${phase.total} locations`
-              }
-              value={phase.total ? phase.done / phase.total : undefined}
-            />
+          {phase.kind === 'weather' && <Progress text={`Fetching forecasts for ${phase.total} locations…`} />}
+          {phase.kind === 'heatmap' && (
+            <p className="notice info">
+              Routes are scored. The heatmap needs more forecasts than the weather service allows per minute,
+              so it fills in{phase.waitingS ? ` in about ${phase.waitingS} s` : ' shortly'}.
+            </p>
           )}
           {phase.kind === 'scoring' && <Progress text="Scoring routes…" />}
           {phase.kind === 'error' && (

@@ -118,6 +118,11 @@ export interface components {
             grid: {
                 [key: string]: unknown;
             };
+            /**
+             * Checkpoint Points
+             * @description The first N weather points are checkpoints; the rest are heatmap cells
+             */
+            checkpoint_points: number;
             /** Weather Points */
             weather_points: components["schemas"]["WeatherPoint"][];
         };
@@ -227,7 +232,7 @@ export interface components {
             ranking: components["schemas"]["RankingOut"];
             /**
              * Heatmap
-             * @description Per hour, one char per grid cell: 0-4 or u
+             * @description Per hour, base64 bytes, one per grid cell: severity x 50 (0-200), 255 unknown
              */
             heatmap: string[];
         };

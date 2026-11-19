@@ -8,6 +8,7 @@ from planner.domain.risk import (
     assess,
     load_adjusted_wind_level,
     rain_level,
+    severity_index,
     snow_level,
     wind_level,
 )
@@ -107,3 +108,23 @@ def test_more_weather_or_load_never_lowers_risk(
     assert assess(Conditions(wind, rain + 0.05, snow), cargo).level >= base
     assert assess(Conditions(wind, rain, snow + 0.1), cargo).level >= base
     assert assess(Conditions(wind, rain, snow), min(80_000, cargo + 5_000)).level >= base
+
+
+@given(
+    st.floats(0, 120, allow_nan=False),
+    st.floats(0, 3, allow_nan=False),
+    st.floats(0, 5, allow_nan=False),
+    st.integers(0, 80_000),
+)
+def test_severity_index_never_disagrees_with_the_level(
+    wind: float, rain: float, snow: float, cargo: int
+) -> None:
+    c = Conditions(wind, rain, snow)
+    idx = severity_index(c, cargo)
+    assert int(idx) == assess(c, cargo).level
+    assert 0 <= idx <= 4
+
+
+def test_severity_index_shows_depth_within_band() -> None:
+    assert severity_index(Conditions(30, 0, 0), 0) == pytest.approx(1.5)  # halfway 25-35
+    assert severity_index(Conditions(55, 0, 0), 0) == 4.0

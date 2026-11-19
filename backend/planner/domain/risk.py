@@ -109,6 +109,35 @@ class Assessment:
         return "wind"
 
 
+def _fraction(value: float, edges: tuple[float, float, float], top: float, level: Level) -> float:
+    """How far `value` sits through its band, 0 to just under 1 (0 for No Travel)."""
+    bounds = (0.0, *edges, top)
+    if level >= Level.NO_TRAVEL:
+        return 0.0
+    lo, hi = bounds[level], bounds[level + 1]
+    return min(0.99, max(0.0, (value - lo) / (hi - lo)))
+
+
+def severity_index(c: Conditions, cargo_lb: int) -> float:
+    """A continuous 0-4 risk value for smooth shading.
+
+    Its whole-number part is always the risk level, so a smoothed heatmap can never
+    disagree with the level used for scoring; the fraction says how deep into that band
+    the deciding condition is.
+    """
+    a = assess(c, cargo_lb)
+    fractions = [0.0]
+    if a.wind == a.level and a.wind == wind_level(c.wind_mph):  # not bumped by a load rule
+        fractions.append(
+            _fraction(round(c.wind_mph, 1), WIND_EDGES_MPH, WIND_NO_TRAVEL_MPH, a.wind)
+        )
+    if a.rain == a.level:
+        fractions.append(_fraction(c.rain_in_hr, RAIN_EDGES_IN_HR, RAIN_NO_TRAVEL_IN_HR, a.rain))
+    if a.snow == a.level:
+        fractions.append(_fraction(c.snow_in_hr, SNOW_EDGES_IN_HR, SNOW_NO_TRAVEL_IN_HR, a.snow))
+    return int(a.level) + max(fractions)
+
+
 def assess(c: Conditions, cargo_lb: int) -> Assessment:
     """Overall risk is the worst of wind (after load rules), rain and snow."""
     wind = load_adjusted_wind_level(c.wind_mph, cargo_lb)

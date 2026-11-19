@@ -1,13 +1,18 @@
 // Fetches raw hourly forecasts from Open-Meteo in the browser.
 //
-// Open-Meteo's free tier is limited per IP address (600 location-calls a minute). Calling
-// it from the browser spends the viewer's own quota instead of a shared server IP's.
-// Django does all the scoring; this module only downloads and slices the numbers.
+// Open-Meteo's free tier is limited per IP address. Calling it from the browser spends
+// the viewer's own quota instead of a serverless host's shared one. Django does all the
+// scoring; this module only downloads and slices the numbers.
+//
+// Limits (measured): up to 1,000 locations per request; each location costs one call;
+// 600 calls a minute, but a single request that goes over is still served, and only the
+// next one is refused. So: one big request when possible, and wait out the minute only
+// before a second one.
 import type { PointWeather, WeatherPoint } from '../api/client'
 
 const URL = 'https://api.open-meteo.com/v1/forecast'
-const CHUNK = 250 // locations per request; each location counts as one call
-const PER_MINUTE = 550 // stay under the 600/minute limit
+const MAX_PER_REQUEST = 1000
+const PER_MINUTE = 600
 const HOUR = 3600
 const VARS = ['wind_speed_10m', 'wind_gusts_10m', 'rain', 'showers', 'snowfall'] as const
 
@@ -51,15 +56,14 @@ async function request(chunk: WeatherPoint[], forecastHours: number, signal?: Ab
   }
 }
 
+function hoursOf(p: WeatherPoint) {
+  return Math.round((p.end - p.start) / HOUR) + 1
+}
+
 function slice(h: Hourly, p: WeatherPoint): PointWeather {
-  const t0 = h.time[0] ?? 0
-  const first = Math.round((p.start - t0) / HOUR)
-  const n = Math.round((p.end - p.start) / HOUR) + 1
-  const pick = (arr: (number | null)[]) =>
-    Array.from({ length: n }, (_, k) => {
-      const v = arr[first + k]
-      return v === undefined ? null : v
-    })
+  const first = Math.round((p.start - (h.time[0] ?? 0)) / HOUR)
+  const n = hoursOf(p)
+  const pick = (arr: (number | null)[]) => Array.from({ length: n }, (_, k) => arr[first + k] ?? null)
   return {
     wind: pick(h.wind_speed_10m),
     gust: pick(h.wind_gusts_10m),
@@ -69,33 +73,53 @@ function slice(h: Hourly, p: WeatherPoint): PointWeather {
   }
 }
 
+/** Placeholder for a point not fetched yet: all values unknown. */
+export function missing(p: WeatherPoint): PointWeather {
+  const nulls = () => Array.from({ length: hoursOf(p) }, () => null)
+  return { wind: nulls(), gust: nulls(), rain: nulls(), showers: nulls(), snow: nulls() }
+}
+
+/**
+ * Downloads forecasts for `points` in as few requests as possible. `onBatch` receives
+ * the full array (unfetched points filled with unknowns) after each request, so the
+ * caller can score routes before the heatmap cells arrive.
+ */
 export async function fetchForecasts(
   points: WeatherPoint[],
-  onProgress: (done: number, total: number, waitingS?: number) => void,
+  firstBatch: number,
+  onBatch: (weather: PointWeather[], done: number) => Promise<void>,
+  onWait: (seconds: number) => void,
   signal?: AbortSignal,
-): Promise<PointWeather[]> {
+): Promise<void> {
   const nowHour = Math.floor(Date.now() / 1000 / HOUR) * HOUR
   const lastEnd = Math.max(...points.map((p) => p.end))
-  // time[0] is the current hour; request through the last hour any point needs.
   const forecastHours = Math.min(384, Math.ceil((lastEnd - nowHour) / HOUR) + 2)
-  const out: PointWeather[] = []
+  const weather = points.map(missing)
+
+  // Everything in one request if it fits; otherwise checkpoints first, then the rest.
+  const cuts =
+    points.length <= MAX_PER_REQUEST
+      ? [0, points.length]
+      : [0, Math.min(firstBatch, MAX_PER_REQUEST)].concat(
+          Array.from({ length: Math.ceil((points.length - firstBatch) / MAX_PER_REQUEST) }, (_, k) =>
+            Math.min(points.length, firstBatch + (k + 1) * MAX_PER_REQUEST),
+          ),
+        )
+  let windowStart = 0
   let spent = 0
-  let windowStart = performance.now()
-  onProgress(0, points.length)
-  for (let i = 0; i < points.length; i += CHUNK) {
-    const chunk = points.slice(i, i + CHUNK)
-    if (spent + chunk.length > PER_MINUTE) {
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const chunk = points.slice(cuts[k], cuts[k + 1])
+    if (spent >= PER_MINUTE || (spent > 0 && spent + chunk.length > PER_MINUTE)) {
       const waitMs = Math.max(0, 61_000 - (performance.now() - windowStart))
-      onProgress(i, points.length, Math.ceil(waitMs / 1000))
+      onWait(Math.ceil(waitMs / 1000))
       await sleep(waitMs, signal)
       spent = 0
-      windowStart = performance.now()
     }
+    if (spent === 0) windowStart = performance.now()
     const locations = await request(chunk, forecastHours, signal)
     if (locations.length !== chunk.length) throw new WeatherError('Weather service returned the wrong number of locations')
-    chunk.forEach((p, k) => out.push(slice(locations[k]!.hourly, p)))
+    chunk.forEach((p, i) => (weather[cuts[k]! + i] = slice(locations[i]!.hourly, p)))
     spent += chunk.length
-    onProgress(Math.min(i + CHUNK, points.length), points.length)
+    await onBatch(weather, cuts[k + 1]!)
   }
-  return out
 }
