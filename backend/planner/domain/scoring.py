@@ -139,7 +139,8 @@ def _fmt(criterion: str, value: float) -> str:
         return f"{value:.2f}"
     if criterion == "trip_min":
         h, m = divmod(int(value), 60)
-        return f"{h} h {m:02d} min"
+        d, h = divmod(h, 24)
+        return f"{d} d {h} h {m:02d} min" if d else f"{h} h {m:02d} min"
     return f"{value:g} mi"
 
 

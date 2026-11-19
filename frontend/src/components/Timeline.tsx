@@ -93,11 +93,11 @@ export default function Timeline({ hours, departure, timeZone, mode, onMode, hea
       </div>
       <div className="toggles">
         <div className="seg small" role="radiogroup" aria-label="Wind value used for risk">
-          <button type="button" role="radio" aria-checked={mode === 'sustained'} className={mode === 'sustained' ? 'on' : undefined} onClick={() => onMode('sustained')} title="Rate wind on sustained speed (the brief's table)">
-            Sustained
-          </button>
-          <button type="button" role="radio" aria-checked={mode === 'gust'} className={mode === 'gust' ? 'on' : undefined} onClick={() => onMode('gust')} title="Conservative: rate wind on gusts">
+          <button type="button" role="radio" aria-checked={mode === 'gust'} className={mode === 'gust' ? 'on' : undefined} onClick={() => onMode('gust')} title="Rate wind on gusts, which is what blows trucks over (default)">
             Gusts
+          </button>
+          <button type="button" role="radio" aria-checked={mode === 'sustained'} className={mode === 'sustained' ? 'on' : undefined} onClick={() => onMode('sustained')} title="Rate wind on sustained speed instead">
+            Sustained
           </button>
         </div>
         <label className="check small">

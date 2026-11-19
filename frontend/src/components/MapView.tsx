@@ -35,6 +35,14 @@ const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 const US_BOUNDS: LngLatBoundsLike = [[-125, 24], [-66, 50]]
 const SELECTED_LOW = '#1e3a8a' // the selected route reads as "selected" where risk is Low
 
+const SEMI_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="96" viewBox="0 0 24 48">
+  <rect x="5" y="17" width="14" height="29" rx="1.5" fill="#f8fafc" stroke="#111827" stroke-width="1.6"/>
+  <line x1="8" y1="21" x2="16" y2="21" stroke="#94a3b8" stroke-width="1"/>
+  <rect x="6" y="3" width="12" height="12" rx="3" fill="#1e3a8a" stroke="#ffffff" stroke-width="1.4"/>
+  <rect x="8" y="4.5" width="8" height="3" rx="1" fill="#bfdbfe"/>
+  <rect x="10.5" y="14.5" width="3" height="3" fill="#111827"/>
+</svg>`
+
 const levelColor = (low: string) =>
   [
     'match', ['coalesce', ['feature-state', 'level'], -1],
@@ -87,7 +95,18 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
     map.touchZoomRotate.disableRotation()
 
+    // A top-down semi (tractor + trailer) pointing north; the layer rotates it to the route.
+    const semi = new Image(48, 96)
+    const addSemi = () => {
+      if (semi.complete && semi.naturalWidth && map.isStyleLoaded() && !map.hasImage('semi')) {
+        map.addImage('semi', semi, { pixelRatio: 2 })
+      }
+    }
+    semi.onload = addSemi
+    semi.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SEMI_SVG)}`
+
     map.on('load', () => {
+      addSemi()
       const before = map.getLayer(LABEL_LAYER) ? LABEL_LAYER : undefined
       map.addSource('routes', { type: 'geojson', data: EMPTY })
       map.addSource('segments', { type: 'geojson', data: EMPTY })
@@ -151,13 +170,15 @@ export default function MapView({ plan, score, mode, selected, heatmapOn, onSele
       })
       map.addLayer({
         id: 'truck',
-        type: 'circle',
+        type: 'symbol',
         source: 'truck',
-        paint: {
-          'circle-color': '#111827',
-          'circle-radius': 7,
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 3,
+        layout: {
+          'icon-image': 'semi',
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 0.8, 8, 1.1],
+          'icon-rotate': ['get', 'bearing'],
+          'icon-rotation-alignment': 'map',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
       })
       setReady(true)
@@ -357,18 +378,27 @@ function truckAt(plan: Plan, route: number, t: number): FeatureCollection<Point>
   const cps = plan.checkpoints.features.filter((f) => f.properties.route === route)
   if (!cps.length || t < plan.departure) return { type: 'FeatureCollection', features: [] }
   let pos = cps[cps.length - 1]!.geometry.coordinates
+  let bearing = 0
   for (let k = 1; k < cps.length; k++) {
     const a = cps[k - 1]!
     const b = cps[k]!
+    const [ax, ay] = a.geometry.coordinates as [number, number]
+    const [bx, by] = b.geometry.coordinates as [number, number]
+    bearing = bearingDeg(ay, ax, by, bx)
     if (t <= b.properties.eta) {
       const span = b.properties.eta - a.properties.eta || 1
       const f = Math.max(0, Math.min(1, (t - a.properties.eta) / span))
-      const [ax, ay] = a.geometry.coordinates as [number, number]
-      const [bx, by] = b.geometry.coordinates as [number, number]
       pos = [ax + (bx - ax) * f, ay + (by - ay) * f]
       break
     }
   }
-  const feature: Feature<Point> = { type: 'Feature', geometry: { type: 'Point', coordinates: pos }, properties: {} }
+  const feature: Feature<Point> = { type: 'Feature', geometry: { type: 'Point', coordinates: pos }, properties: { bearing } }
   return { type: 'FeatureCollection', features: [feature] }
+}
+
+function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const r = Math.PI / 180
+  const y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r)
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r)
+  return (Math.atan2(y, x) / r + 360) % 360
 }

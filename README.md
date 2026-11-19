@@ -14,7 +14,7 @@ Stack: React 19 + TypeScript + MapLibre GL (Vite) on the front end, Django 6 + D
 2. **Weather where the truck will be, when it will be there.** Checkpoints every 10, 25 or 50 miles (your choice) get the forecast for the truck's arrival time, including US hours-of-service breaks (on by default).
 3. **Risk per checkpoint**, using the brief's thresholds and load rules exactly. The worst of wind, rain and snow sets the level.
 4. **A recommendation** using the brief's order: fewest Severe miles, then fewest High miles, then lowest average risk, then shortest time. Each route gets one line explaining the deciding criterion.
-5. **A map** with all three routes, the selected route coloured by risk, checkpoint popups (ETA, wind, gusts, rain, snow, what drove the level) and a smooth weather heatmap with a 0 to 48 hour slider and play button.
+5. **A map** with all three routes, the selected route coloured by risk, checkpoint popups (ETA, wind, gusts, rain, snow, what drove the level), a truck that follows the slider, required rest stops and a smooth weather heatmap with a 0 to 48 hour slider and play button.
 
 ## How it works
 
@@ -48,6 +48,8 @@ map + cards
 - Rain, snow and gusts are totals or maxima for the hour that *ends* at each timestamp, so a truck arriving at 13:20 uses the 14:00 value. Sustained wind is a snapshot, so it uses the larger of 13:00 and 14:00.
 - Up to 1,000 locations go in one request. Checkpoints come first, so routes are scored even if heatmap cells have to wait for the per-minute limit. Forecasts are cached in the tab for 30 minutes.
 - A missing forecast is **Unknown**, never Low.
+- If the viewer's network has used up its Open-Meteo quota, `/score` downloads the missing points from the server's own address and the UI says so.
+- **Checked against an independent source:** on a Seattle to Washington DC run, gusts at 10 checkpoints matched the National Weather Service's own forecast within 1 to 5 mph for the first 48 hours and within about 10 mph after that (the models drift apart further out). Later hours are labelled lower-confidence on the slider rather than replaced with a frozen hour-48 snapshot.
 
 ## Interpretations of the brief
 
@@ -59,7 +61,7 @@ Each of these is pinned by a test.
 | Values between printed integers (34.5 mph) | Belong to the lower band: [25, 35) is Moderate. | No gaps in coverage. |
 | Float noise (0.09 + 0.01 = 0.0999…) | Values are rounded to the forecast's precision before comparison. | Otherwise 0.10 in/hr reads as Low. |
 | "Load weight" | Cargo weight, 0 to 80,000 lb. The load rules apply to it as written (`> 30,000`, `> 40,000`). | The rules' thresholds only make sense for cargo. |
-| Sustained wind or gusts | Sustained by default (matches the table and a hand check), with a **Gusts** toggle for a conservative view. Both results come back in one response, so the toggle is instant. | Real high-wind closures (for example WYDOT's) are set on gusts. |
+| Sustained wind or gusts | **Gusts by default**, with a **Sustained** toggle for the literal table reading. Both results come back in one response, so the toggle is instant. | Trucks are blown over by gusts, not average wind; real high-wind closures (for example WYDOT's) are set on gusts. On a coast-to-coast test, sustained wind rated every route Low while gusts found 100 to 220 High miles. |
 | No Travel in the ranking | No Travel miles are compared before Severe miles, and a route with any No Travel miles is never "Recommended". | No Travel is worse than Severe. |
 | Missing forecasts | Ranked twice, once as Low and once as No Travel. A route is recommended only if it wins both ways. | Unknown weather must not decide or hide a recommendation. |
 | Miles per checkpoint | Each checkpoint stands for the road halfway to each neighbour, so the miles add up exactly to the route length. | Fair at the ends and for short trips. |

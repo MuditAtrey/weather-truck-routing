@@ -49,7 +49,8 @@ export default function App() {
   const [score, setScore] = useState<ScoreOut | null>(null)
   const [labels, setLabels] = useState<[string, string]>(['', ''])
   const [selected, setSelected] = useState(0)
-  const [mode, setMode] = useState<WindMode>('sustained')
+  // Trucks are blown over by gusts, not average wind, so gusts drive the recommendation.
+  const [mode, setMode] = useState<WindMode>('gust')
   const [heatmapOn, setHeatmapOn] = useState(true)
   const [serverWeather, setServerWeather] = useState(false)
   const ctrl = useRef<AbortController | null>(null)

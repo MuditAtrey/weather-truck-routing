@@ -51,7 +51,7 @@ input[aria-invalid='true'] { border-color: var(--bad); }
 .actions { display: flex; gap: 8px; }
 button.primary { flex: 1; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
 button.primary:disabled { opacity: 0.6; cursor: progress; }
-button.ghost { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
+.ghost { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
 .presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
 .chip { padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: #f9fafb; cursor: pointer; font-size: 12px; }
 .chip:hover { border-color: var(--accent); }
