@@ -147,7 +147,7 @@ Django Ninja rather than Django REST Framework: the plan endpoint makes several 
 
 ## Data and licences
 
-Code: MIT (see `LICENSE`). Data is not MIT:
+Code: © 2026 Mudit Atrey, all rights reserved; shared for review (see `LICENSE`). Data keeps its own licences:
 routes © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) via [FOSSGIS Valhalla](https://valhalla.openstreetmap.de) and [OSRM](https://project-osrm.org);
 weather by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0, non-commercial use);
 basemap by [OpenFreeMap](https://openfreemap.org) / OpenMapTiles;
