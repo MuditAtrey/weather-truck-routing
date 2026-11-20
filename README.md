@@ -3,7 +3,7 @@
 Plan a truck trip and get three routes, each scored on forecast gusts, rain and snow at the time the truck will actually be at each point. The app recommends the safest route, says why the others lost, places the driver's required rest stops at real truck stops, and plays the trip hour by hour with the weather along the corridor.
 
 **Live app:** https://weather-truck-routing-vert.vercel.app
-**Walkthrough (Loom):** _link to be added_
+**Walkthrough (Loom, 8 min in two parts):** [Part 1: demo](https://www.loom.com/share/132243ad0111468ea634bfb69025e017) (3:44) · [Part 2: logic, tests and code](https://www.loom.com/share/ff36bdfef5a84df9ade6cdc8411fcbd1) (4:19)
 **API docs:** https://weather-truck-routing-vert.vercel.app/api/docs
 
 Stack: React 19 + TypeScript + MapLibre GL (Vite) on the front end, Django 6 + Django Ninja on the back end, deployed on Vercel. No database, no API keys.
